@@ -1,0 +1,8 @@
+datasets
+huggingface_hub
+rich
+zstandard
+datasets 
+pyarrow
+fsspec
+typer
