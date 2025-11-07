@@ -13,7 +13,6 @@ def load_snapshots(snapshots_file):
         return json.load(f)
     
 
-
 def dump_snapshots(snapshots, snapshot_path):
     part = f"{snapshot_path}.part"
     with open(part, "w") as f:

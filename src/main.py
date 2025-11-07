@@ -36,9 +36,27 @@ def download():
     download.download(snapshot_file)
     
     
+@app.command()
+def fetch_missing(flush_every: int = typer.Option(25, help="Persist JSON after this many updates")):
+    import parse
+    parse.fetch_missing_offsets(snapshot_file, flush_every=flush_every)
+
+
+@app.command()
+def export_parquet(
+    output_dir: str = typer.Option(None, help="Output directory for parquet files"),
+    include_body: bool = typer.Option(True, help="Include downloaded HTML bodies"),
+):
+    import export
+    export.export_snapshots_to_parquet(snapshot_file, output_dir=output_dir, include_body=include_body)
+
+
+
 if __name__ == "__main__":
     app()
     
     
 # snapshot: file_name(id, str), uri_extracted(bool), snapshot_id(str), offsets_extracted(bool), downloaded(bool), archived(bool)
+# checked_index: name(id, str), snapshot(snapshot's file name, secondary key)
+# records: uri(id, str), offset(int), length(int),  filename(int), warc_record_id(str), warc_date(int), local_file(str)
     

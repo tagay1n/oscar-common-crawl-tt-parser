@@ -6,3 +6,6 @@ datasets
 pyarrow
 fsspec
 typer
+warcio
+beautifulsoup4
+html5lib

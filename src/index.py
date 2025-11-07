@@ -22,5 +22,5 @@ def index_snapshots_file(snapshot_file):
             relevant_files[_k] = _v
             
     with open(snapshot_file, "w") as f:
-        json.dump(relevant_files, f, indent=4, ensure_ascii=False)
+        json.dump(relevant_files, f, indent=4, ensure_ascii=False, sort_keys=True)
     print(f"Found {len(relevant_files)} files")
