@@ -123,6 +123,6 @@ Persistent workspace (`~/.oscar/`):
 
 ## License
 
-MIT (or specify your license of choice).
+MIT
 
 
