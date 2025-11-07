@@ -15,7 +15,7 @@ from utils import load_snapshots
 def download(snapshot_file):
     snapshots = load_snapshots(snapshot_file)
 
-    for filename, data in snapshots.items():
+    for filename, data in list(snapshots.items())[:3]:
         print(f"[bold green]Processing snapshot {filename}[/bold green]")
         try:
             _process_snapshot(data)

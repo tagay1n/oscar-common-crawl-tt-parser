@@ -66,7 +66,7 @@ def collect_offsets(snapshots_file):
     
     related_file = None 
     related_file_path = None
-    for filename, data in snapshots.items():
+    for filename, data in list(snapshots.items())[:]:
         related_file_path = data.get("related_file", None)
         print(f"Extracting offsets for file: '{filename}'")
         

@@ -43,12 +43,9 @@ def fetch_missing(flush_every: int = typer.Option(25, help="Persist JSON after t
 
 
 @app.command()
-def export_parquet(
-    output_dir: str = typer.Option(None, help="Output directory for parquet files"),
-    include_body: bool = typer.Option(True, help="Include downloaded HTML bodies"),
-):
+def export_parquet():
     import export
-    export.export_snapshots_to_parquet(snapshot_file, output_dir=output_dir, include_body=include_body)
+    export.export_snapshots_to_parquet(snapshot_file)
 
 
 
