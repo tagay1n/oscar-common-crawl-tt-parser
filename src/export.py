@@ -7,6 +7,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from rich import print
 from rich.progress import track
+import trafilatura
 
 from utils import load_snapshots
 
@@ -16,7 +17,7 @@ def export_snapshots_to_parquet(snapshot_file):
 
     snapshots = load_snapshots(snapshot_file)
 
-    for filename, data in list(snapshots.items())[:2]:
+    for filename, data in list(snapshots.items())[:1]:
         related_path = data.get("related_file")
         if not related_path or not os.path.exists(related_path):
             print(f"[yellow]Skipping {filename}: related file missing[/yellow]")
@@ -45,6 +46,20 @@ def export_snapshots_to_parquet(snapshot_file):
             except Exception:
                 raise ValueError(f"[yellow]Failed to read HTML from {saved_path}[/yellow]")
 
+            # Convert HTML to markdown using trafilatura
+            try:
+                markdown = trafilatura.extract(
+                    html,
+                    output_format="markdown",
+                    include_formatting=True,
+                    include_tables=True,
+                    include_images=True,
+                    include_links=True,
+                    include_comments=True,
+                )
+            except Exception as e:
+                raise ValueError(f"[yellow]Failed to convert HTML to markdown for {url}: {e}[/yellow]")
+
             rows.append(
                 {
                     "url": url,
@@ -52,6 +67,7 @@ def export_snapshots_to_parquet(snapshot_file):
                     "length": int(length),
                     "filename": cc_filename,
                     "html": html,
+                    "markdown": markdown,
                 }
             )
 

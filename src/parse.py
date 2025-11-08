@@ -11,7 +11,9 @@ import gzip
 from rich import print
 from datetime import timezone, datetime
 from collections import defaultdict
-import re
+from time import sleep
+import urlcanon
+import random
 
 
 def collect_uris(snapshots_path, related_files_dir):
@@ -40,7 +42,7 @@ def collect_uris(snapshots_path, related_files_dir):
                         if not line:
                             continue
                         record = json.loads(line)
-                        warc_target_uri = record['warc_headers']["warc-target-uri"].lower()
+                        warc_target_uri = _canonize(record['warc_headers']["warc-target-uri"])
                         warc_record_id = record['warc_headers']["warc-record-id"]
                         warc_date = record['warc_headers']["warc-date"]
                         records[warc_target_uri].update({
@@ -61,11 +63,13 @@ def collect_uris(snapshots_path, related_files_dir):
                 os.remove(oscars_ds_path)
                 
                 
+def _canonize(url):
+    return str(urlcanon.parse_url(url.lower()))
+
+
 def collect_offsets(snapshots_file):
     snapshots = load_snapshots(snapshots_file=snapshots_file)
     
-    related_file = None 
-    related_file_path = None
     for filename, data in list(snapshots.items())[:]:
         related_file_path = data.get("related_file", None)
         print(f"Extracting offsets for file: '{filename}'")
@@ -112,7 +116,7 @@ def fetch_missing_offsets(snapshots_file, flush_every: int = 25):
     Best-effort; persists JSON after each successful resolution.
     """
     snapshots = load_snapshots(snapshots_file=snapshots_file)
-    for filename, data in list(snapshots.items())[:3]:
+    for filename, data in list(snapshots.items())[2:3]:
         related_file_path = data.get("related_file", None)
         if not related_file_path:
             raise ValueError("Related file path not found for offset resolution")
@@ -149,6 +153,7 @@ def fetch_missing_offsets(snapshots_file, flush_every: int = 25):
             except Exception as e:
                 print(f"  Failed to resolve '{url}': {e}")
                 continue
+            sleep(1)
         if dirty_since_flush:
             _dump_related_file(related_file_path, related)
         print(f"  Resolved {resolved}/{len(missing)}")
@@ -258,7 +263,7 @@ def _parse_cdx_new(line: str):
     
 
 def _clean(v):
-    return None if v in ("-", "NONE", "", None) else v.strip().lower()
+    return None if v in ("-", "NONE", "", None) else _canonize(v.strip())
     
 
 def _dump_related_file(related_file_path, data):
@@ -268,7 +273,89 @@ def _dump_related_file(related_file_path, data):
     os.rename(part, related_file_path)
 
 
-def _cdx_lookup(snapshot_id: str, url: str, warc_date: int | None):
+def _cdx_lookup(snapshot_id: str, url: str, warc_date: int | None, max_retries: int = 5):
+    """Query Common Crawl CDX API for one URL within a snapshot and choose the best match (polite version)."""
+    base = f"https://index.commoncrawl.org/CC-MAIN-{snapshot_id}-index"
+    params = {
+        "url": url,
+        "output": "json",
+        "fl": "timestamp,length,offset,filename,mimetype,status,digest,original",
+    }
+
+    headers = {
+        # RFC 9110-compliant and identifies your app
+        "User-Agent": "TT-common-crawl/1.0 (+https://huggingface.co/yasalma)"
+    }
+
+    # Retry with exponential backoff on 503s or network errors
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(base, params=params, headers=headers, timeout=30)
+
+            # If we hit a 503, slow down exponentially
+            if resp.status_code == 503:
+                wait = 5 * (2 ** attempt) + random.uniform(0, 3)
+                print(f"503 rate limit: sleeping {wait:.1f}s")
+                sleep(wait)
+                continue
+
+            # Retry on transient network issues
+            if resp.status_code >= 500:
+                wait = 3 * (2 ** attempt)
+                print(f"Server error {resp.status_code}: retrying in {wait}s")
+                sleep(wait)
+                continue
+
+            if resp.status_code != 200:
+                print(f"CDX lookup failed ({resp.status_code}) for {url}")
+                return None
+
+            # Polite random jitter between calls
+            sleep(random.uniform(1.5, 3.5))
+
+            lines = [l for l in resp.text.splitlines() if l.strip()]
+            if not lines:
+                return None
+
+            items = []
+            for line in lines:
+                try:
+                    item = json.loads(line)
+                    if not item.get("filename") or not item.get("offset") or not item.get("length"):
+                        continue
+                    mt = str(item.get("mimetype") or "").lower()
+                    if mt and "html" not in mt:
+                        continue
+                    items.append(item)
+                except Exception:
+                    continue
+
+            if not items:
+                return None
+
+            if warc_date is None:
+                return items[0]
+
+            def score(it):
+                try:
+                    ts = _cc_timestamp(it.get("timestamp"))
+                    return abs(ts - warc_date)
+                except Exception:
+                    return 10**12
+
+            items.sort(key=score)
+            return items[0]
+
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            wait = 5 * (2 ** attempt)
+            print(f"Network error: {e}, waiting {wait}s")
+            sleep(wait)
+            continue
+
+    print(f"CDX lookup failed after {max_retries} retries for {url}")
+    return None
+
+def _cdx_lookup2(snapshot_id: str, url: str, warc_date: int | None):
     """Query Common Crawl CDX API for one URL within a snapshot and choose the best match."""
     base = f"https://index.commoncrawl.org/CC-MAIN-{snapshot_id}-index"
     params = {
@@ -309,4 +396,4 @@ def _cdx_lookup(snapshot_id: str, url: str, warc_date: int | None):
         except Exception:
             return 10**12
     items.sort(key=score)
-    return items[0]
+    

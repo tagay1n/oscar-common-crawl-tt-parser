@@ -9,7 +9,7 @@ This project automates the extraction of Tatar-language HTML pages from the OSCA
 - Resolves Common Crawl `offset`, `length`, and WARC `filename` via the CC index
 - Downloads HTML bodies by byte-range streaming from Common Crawl
 - Fills gaps using the Common Crawl CDX API for stubborn URLs
-- Exports per-snapshot Parquet files containing URL, offsets, filenames, and HTML content
+- Exports per-snapshot Parquet files containing URL, offsets, filenames, HTML content, and markdown (via Trafilatura)
 - Provides status and troubleshooting helpers through a Typer CLI
 
 ## Installation
@@ -89,6 +89,7 @@ Reads the per-snapshot JSON + downloaded HTML files and writes one Parquet file 
 | `length` | Byte length of the response |
 | `filename` | WARC filename on Common Crawl |
 | `html` | Downloaded and healed HTML content |
+| `markdown` | HTML converted to markdown format using Trafilatura (with metadata) |
 
 ```bash
 python -m src.main export_parquet
@@ -118,7 +119,8 @@ Persistent workspace (`~/.oscar/`):
 
 - The Common Crawl requests can be bandwidth-heavy. Consider running `collect_offsets` and `download` in batches or with resumed snapshots.
 - HTML healing uses BeautifulSoup (`html5lib` parser) to tolerate malformed markup. Adjust `heal_html` if you need raw bytes or a different parser.
-- Parquet export includes full HTML bodies by default; modify `export.export_snapshots_to_parquet` if you prefer to store references only.
+- Markdown conversion is performed using Trafilatura with `output_format="markdown"` and `with_metadata=True`. If conversion fails for a document, the markdown field will be `None`.
+- Parquet export includes full HTML bodies and markdown by default; modify `export.export_snapshots_to_parquet` if you prefer to store references only.
 - If you interrupt the pipeline, re-running commands resumes where they left off thanks to the JSON state files.
 
 ## License

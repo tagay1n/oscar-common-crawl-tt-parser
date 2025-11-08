@@ -37,9 +37,9 @@ def download():
     
     
 @app.command()
-def fetch_missing(flush_every: int = typer.Option(25, help="Persist JSON after this many updates")):
+def fetch_missing():
     import parse
-    parse.fetch_missing_offsets(snapshot_file, flush_every=flush_every)
+    parse.fetch_missing_offsets(snapshot_file)
 
 
 @app.command()
@@ -48,12 +48,7 @@ def export_parquet():
     export.export_snapshots_to_parquet(snapshot_file)
 
 
-
 if __name__ == "__main__":
     app()
     
-    
-# snapshot: file_name(id, str), uri_extracted(bool), snapshot_id(str), offsets_extracted(bool), downloaded(bool), archived(bool)
-# checked_index: name(id, str), snapshot(snapshot's file name, secondary key)
-# records: uri(id, str), offset(int), length(int),  filename(int), warc_record_id(str), warc_date(int), local_file(str)
     

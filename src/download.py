@@ -66,8 +66,8 @@ def _process_snapshot(data):
 
             for record in it:
                 if record.rec_type == "response":
-                    if record.http_headers:
-                        content_type = record.http_headers.get_header("Content-Type")
+                    # if record.http_headers:
+                        # content_type = record.http_headers.get_header("Content-Type")
                     payload = record.content_stream().read()
                     # Handle gzip-encoded HTTP body
                     encoding = (

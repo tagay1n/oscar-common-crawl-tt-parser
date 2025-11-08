@@ -9,3 +9,5 @@ typer
 warcio
 beautifulsoup4
 html5lib
+trafilatura
+urlcanon
