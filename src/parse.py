@@ -70,6 +70,8 @@ def _canonize(url):
 def collect_offsets(snapshots_file):
     snapshots = load_snapshots(snapshots_file=snapshots_file)
     
+    # snapshots = { k: v for k, v in snapshots.items() if k == 'data/2015-48/tt_meta/tt_meta.jsonl.zst'}
+    
     for filename, data in list(snapshots.items())[:]:
         related_file_path = data.get("related_file", None)
         print(f"Extracting offsets for file: '{filename}'")
@@ -97,18 +99,14 @@ def collect_offsets(snapshots_file):
                     continue
                 checked_indexes.add(index_url)
                 data['checked_indexes'] = sorted(list(checked_indexes))
-                dump_snapshots(snapshots, snapshot_path=snapshots_file)
                 _dump_related_file(related_file_path, related_file)
-            
+                dump_snapshots(snapshots, snapshot_path=snapshots_file)
+                _print_summary(related_file)
             _print_summary(related_file)
         except Exception as e:
             import traceback
             print(f"Error processing file {filename}: {e} \n{traceback.format_exc()}")
             return
-        finally:
-            dump_snapshots(snapshots, snapshot_path=snapshots_file)
-            if related_file and related_file_path:
-                _dump_related_file(related_file_path, related_file)
 
 
 def fetch_missing_offsets(snapshots_file, flush_every: int = 25):
@@ -116,7 +114,7 @@ def fetch_missing_offsets(snapshots_file, flush_every: int = 25):
     Best-effort; persists JSON after each successful resolution.
     """
     snapshots = load_snapshots(snapshots_file=snapshots_file)
-    for filename, data in list(snapshots.items())[2:3]:
+    for filename, data in list(snapshots.items())[:3]:
         related_file_path = data.get("related_file", None)
         if not related_file_path:
             raise ValueError("Related file path not found for offset resolution")
@@ -162,7 +160,7 @@ def fetch_missing_offsets(snapshots_file, flush_every: int = 25):
 def _print_summary(related_file):
     total = len(related_file)
     found = sum(1 for v in related_file.values() if 'offset' in v and v['offset'] is not None)
-    print(f"  Summary: Found offsets for {found}/{total} digests.")
+    print(f"  Found offsets for {found}/{total} digests.")
 
 
 def _related_file(related_file):
