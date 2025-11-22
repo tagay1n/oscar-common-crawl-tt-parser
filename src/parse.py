@@ -24,6 +24,8 @@ def collect_uris(snapshots_path, related_files_dir):
     oscars_ds_path = None
     
     for filename, data in snapshots.items():
+        if filename != 'data/2016-22/tt_meta/tt_meta.jsonl.zst':
+            continue
         print(f"Processing file: '{filename}'")
         
         if data.get("related_file", None):
@@ -70,9 +72,7 @@ def _canonize(url):
 def collect_offsets(snapshots_file):
     snapshots = load_snapshots(snapshots_file=snapshots_file)
     
-    # snapshots = { k: v for k, v in snapshots.items() if k == 'data/2015-48/tt_meta/tt_meta.jsonl.zst'}
-    
-    for filename, data in list(snapshots.items())[:]:
+    for filename, data in list(snapshots.items())[6:8]:
         related_file_path = data.get("related_file", None)
         print(f"Extracting offsets for file: '{filename}'")
         
@@ -261,7 +261,7 @@ def _parse_cdx_new(line: str):
     
 
 def _clean(v):
-    return None if v in ("-", "NONE", "", None) else _canonize(v.strip())
+    return None if v in ("-", "NONE", "", None) else v.strip()
     
 
 def _dump_related_file(related_file_path, data):
@@ -352,46 +352,3 @@ def _cdx_lookup(snapshot_id: str, url: str, warc_date: int | None, max_retries: 
 
     print(f"CDX lookup failed after {max_retries} retries for {url}")
     return None
-
-def _cdx_lookup2(snapshot_id: str, url: str, warc_date: int | None):
-    """Query Common Crawl CDX API for one URL within a snapshot and choose the best match."""
-    base = f"https://index.commoncrawl.org/CC-MAIN-{snapshot_id}-index"
-    params = {
-        "url": url,
-        "output": "json",
-        "fl": "timestamp,length,offset,filename,mimetype,status,digest,original",
-    }
-    resp = requests.get(base, params=params, timeout=30)
-    if resp.status_code != 200:
-        alt = base.replace("https://", "http://")
-        resp = requests.get(alt, params=params, timeout=30)
-    if resp.status_code != 200:
-        return None
-    lines = [l for l in resp.text.splitlines() if l.strip()]
-    if not lines:
-        return None
-    items = []
-    for line in lines:
-        try:
-            item = json.loads(line)
-            if not item.get("filename") or not item.get("offset") or not item.get("length"):
-                continue
-            # Prefer HTML mimetype when available
-            mt = str(item.get("mimetype") or "").lower()
-            if mt and "html" not in mt:
-                continue
-            items.append(item)
-        except Exception:
-            continue
-    if not items:
-        return None
-    if warc_date is None:
-        return items[0]
-    def score(it):
-        try:
-            ts = _cc_timestamp(it.get("timestamp"))
-            return abs(ts - warc_date)
-        except Exception:
-            return 10**12
-    items.sort(key=score)
-    

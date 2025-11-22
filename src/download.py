@@ -15,7 +15,7 @@ from utils import load_snapshots
 def download(snapshot_file):
     snapshots = load_snapshots(snapshot_file)
 
-    for filename, data in list(snapshots.items())[:2]:
+    for filename, data in list(snapshots.items())[6:8]:
         print(f"[bold green]Processing snapshot {filename}[/bold green]")
         try:
             _process_snapshot(data)
@@ -43,7 +43,7 @@ def _process_snapshot(data):
         offset = details.get("offset")
         length = details.get("length")
         if not filename or offset is None or length is None:
-            print(f"Missing filename/offset/length for url: {url}, details: {details}")
+            # print(f"Missing filename/offset/length for url: {url}, details: {details}")
             continue
 
         start = int(offset)

@@ -17,7 +17,7 @@ def export_snapshots_to_parquet(snapshot_file):
 
     snapshots = load_snapshots(snapshot_file)
 
-    for filename, data in list(snapshots.items())[:1]:
+    for filename, data in list(snapshots.items())[5:6]:
         related_path = data.get("related_file")
         if not related_path or not os.path.exists(related_path):
             print(f"[yellow]Skipping {filename}: related file missing[/yellow]")
@@ -34,7 +34,8 @@ def export_snapshots_to_parquet(snapshot_file):
             length = details.get("length")
             cc_filename = details.get("filename")
             if offset is None or length is None or not cc_filename:
-                raise ValueError(f"Missing offset/length/filename for url: {url}, details: {details}")
+                # print(f"Missing offset/length/filename for url: {url}, details: {details}")
+                continue
 
             saved_path = details.get("saved_path")
             if not saved_path or not os.path.exists(saved_path):
@@ -63,6 +64,7 @@ def export_snapshots_to_parquet(snapshot_file):
             rows.append(
                 {
                     "url": url,
+                    "warc_date": details.get("warc_date"),
                     "offset": int(offset),
                     "length": int(length),
                     "filename": cc_filename,
