@@ -15,7 +15,7 @@ from utils import load_snapshots
 def download(snapshot_file):
     snapshots = load_snapshots(snapshot_file)
 
-    for filename, data in list(snapshots.items())[6:8]:
+    for filename, data in list(snapshots.items())[7:8]:
         print(f"[bold green]Processing snapshot {filename}[/bold green]")
         try:
             _process_snapshot(data)
@@ -101,7 +101,7 @@ def _process_snapshot(data):
             # print(f"[green]Saved {url} -> {out_path} ({len(healed_html)} chars, {content_type})[/green]")
 
         except Exception as e:
-            print(f"[red]Error downloading {url}: {e}[/red]")
+            print(f"[red]Error downloading '{url}': {e}[/red]")
             continue
 
 
