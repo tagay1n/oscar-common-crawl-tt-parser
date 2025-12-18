@@ -1,4 +1,5 @@
 import gzip
+import io
 import json
 import random
 import re
@@ -54,8 +55,13 @@ class RateLimiter:
 
 
 def _parse_line(line: str) -> Optional[dict]:
+    # CDXJ lines look like: "<urlkey> <timestamp> <json>"
+    # We extract the JSON portion and parse that.
     try:
-        obj = json.loads(line)
+        brace = line.find("{")
+        if brace == -1:
+            return None
+        obj = json.loads(line[brace:])
         return obj
     except Exception:
         return None
@@ -130,55 +136,43 @@ def _better_match(current: Optional[CDXMatch], candidate: CDXMatch, warc_date: i
 
 def _list_snapshot_shards(
     settings: Settings, session: Session, snapshot_name: str, target_dir: Path
-) -> list[Path]:
-    # Prefer local files if already present.
-    local = sorted(target_dir.glob("cdx-*.gz"))
-    if local:
-        return local
-
-    # Try S3-style prefix listing first.
-    prefix_url = f"https://data.commoncrawl.org/crawl-data/{snapshot_name}/?prefix=indexes/"
-    names: list[str] = []
+) -> tuple[list[tuple[str, Path]], list[tuple[str, Path]], list[Path]]:
+    """Return (all_shards, missing_shards, all_dest_paths)."""
+    index_paths_url = f"https://data.commoncrawl.org/crawl-data/{snapshot_name}/cc-index.paths.gz"
+    all_entries: list[tuple[str, Path]] = []
+    print(f"[cyan]Downloading shard listing from {index_paths_url}[/cyan]")
     try:
-        resp = session.get(prefix_url, timeout=settings.cdx_timeout)
-        if resp.status_code == 200:
-            names = sorted(set(CDX_NAME_RE.findall(resp.text)))
-    except Exception:
-        pass
+        resp = session.get(index_paths_url, timeout=settings.cdx_timeout)
+        resp.raise_for_status()
+        buf = io.BytesIO(resp.content)
+        with gzip.GzipFile(fileobj=buf) as gzf:
+            for raw_line in gzf:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+                rel = line.split("commoncrawl/")[-1] if "commoncrawl/" in line else line
+                basename = rel.rsplit("/", 1)[-1]
+                if CDX_NAME_RE.fullmatch(basename):
+                    url = f"https://data.commoncrawl.org/{rel}"
+                    all_entries.append((url, target_dir / basename))
+        all_entries = sorted(all_entries, key=lambda x: x[1].name)
+        print(f"[cyan]Found {len(all_entries)} shard names from cc-index.paths.gz[/cyan]")
+    except Exception as e:
+        raise RuntimeError(f"Failed to list CDX shards for {snapshot_name}: {e}") from e
 
-    # Fallback: probe sequential shard names with HEAD until a run of misses.
-    if not names:
-        base = f"https://data.commoncrawl.org/crawl-data/{snapshot_name}/indexes"
-        hits = []
-        consecutive_misses = 0
-        max_misses = 5
-        max_probes = 5000
-        for i in range(max_probes):
-            shard_name = f"cdx-{i:05}.gz"
-            url = f"{base}/{shard_name}"
-            try:
-                r = session.head(url, timeout=settings.cdx_timeout, allow_redirects=True)
-            except Exception:
-                consecutive_misses += 1
-                if consecutive_misses >= max_misses:
-                    break
-                continue
-
-            if r.status_code == 200:
-                hits.append(shard_name)
-                consecutive_misses = 0
-            else:
-                consecutive_misses += 1
-                if hits and consecutive_misses >= max_misses:
-                    break
-
-        names = sorted(set(hits))
-
-    if not names:
+    if not all_entries:
         raise RuntimeError("No cdx-*.gz names found for snapshot")
 
+    # Compare expected list with local files; re-download any missing, even if some shards exist.
     target_dir.mkdir(parents=True, exist_ok=True)
-    return [target_dir / name for name in names]
+    all_paths: list[Path] = []
+    missing: list[tuple[str, Path]] = []
+    for url, dest in all_entries:
+        all_paths.append(dest)
+        if not dest.exists():
+            missing.append((url, dest))
+
+    return all_entries, missing, sorted(all_paths)
 
 
 def _download_shard(settings: Settings, session: Session, url: str, dest: Path) -> None:
@@ -196,16 +190,21 @@ def _ensure_snapshot_shards(
     settings: Settings, session: Session, snapshot_name: str
 ) -> list[Path]:
     target_dir = settings.index_dir / snapshot_name
-    shards = _list_snapshot_shards(settings, session, snapshot_name, target_dir)
-    base = f"https://data.commoncrawl.org/crawl-data/{snapshot_name}/indexes"
+    print(f"[cyan]Gathering shard list for snapshot {snapshot_name}[/cyan]")
+    shards, missing, all_paths = _list_snapshot_shards(
+        settings, session, snapshot_name, target_dir
+    )
 
-    for shard in shards:
-        if shard.exists():
-            continue
-        url = f"{base}/{shard.name}"
-        print(f"[cyan]Downloading CDX shard {shard.name}[/cyan]")
-        _download_shard(settings, session, url, shard)
-    return sorted(shards)
+    if missing:
+        print(
+            f"[cyan]Downloading {len(missing)} of {len(shards)} CDX shards to {target_dir}[/cyan]"
+        )
+        for url, dest in track(missing, description="Downloading CDX shards"):
+            _download_shard(settings, session, url, dest)
+    else:
+        print(f"[cyan]All {len(shards)} CDX shards already present in {target_dir}[/cyan]")
+
+    return sorted(all_paths)
 
 
 def lookup_url(
@@ -372,15 +371,20 @@ def resolve_missing_local(
 ) -> None:
     remaining = limit
     snapshots = [snapshot] if snapshot else db.snapshots_with_missing(conn)
+    print(f"All snapshots: {snapshots}")
     if not snapshots:
         print("[green]No missing offsets to resolve[/green]")
         return
+
+    total_matched = 0
+    total_missing = 0
 
     with requests.Session() as session:
         for snap in snapshots:
             snap_limit = remaining if remaining is not None else None
             rows = list(db.iter_missing_offsets_for_snapshot(conn, snap, limit=snap_limit))
             if not rows:
+                print(f"[yellow]Snapshot {snap}: nothing to resolve[/yellow]")
                 continue
 
             print(
@@ -399,12 +403,12 @@ def resolve_missing_local(
 
             states, candidates = _build_candidate_index(rows)
             print(f"[cyan]Scanning {len(shards)} shards for {len(candidates)} candidate URLs[/cyan]")
-            for shard in shards:
+            for shard in track(shards, description="Scanning CDX shards"):
                 _scan_shard(shard, candidates)
 
             matched = 0
             missing = 0
-            for state in states:
+            for state in track(states, description="Writing matches"):
                 if state.match:
                     matched += 1
                     db.update_offset(
@@ -427,8 +431,14 @@ def resolve_missing_local(
                     )
 
             print(f"[green]{snap}: matched {matched}, missing {missing}[/green]")
+            total_matched += matched
+            total_missing += missing
 
             if remaining is not None:
                 remaining -= len(rows)
                 if remaining <= 0:
                     break
+
+    print(
+        f"[green]Done resolving locally: matched {total_matched}, missing {total_missing}[/green]"
+    )

@@ -63,11 +63,33 @@ def download_warcs(
     downloader.run_cc_downloader(settings, Path(path_file))
 
 
+@cli.command("download-range")
+def download_range(
+    filename: str = typer.Argument(..., help="Common Crawl WARC path, e.g. crawl-data/CC-MAIN-2019-22/segments/.../warc.gz"),
+    offset: int = typer.Argument(..., help="Byte offset in the WARC file (compressed)"),
+    length: int = typer.Argument(..., help="Byte length to fetch"),
+    dest: Path = typer.Option(None, help="Optional output path; defaults to workdir/warc/parts/<name>-<offset>-<end>.warc.gz"),
+):
+    """Download a single byte range from a Common Crawl WARC file."""
+    settings, _ = _connect()
+    downloader.download_range(settings, filename, offset, length, dest)
+
+
 @cli.command("extract-html")
 def extract_html(limit: int = typer.Option(None, help="Limit number of WARC files")):
     """Extract HTML responses from downloaded WARC files."""
     settings, conn = _connect()
     downloader.extract_html(settings, conn, limit=limit)
+
+
+@cli.command("download-ranges")
+def download_ranges(
+    snapshot: str = typer.Option(None, help="Only process a specific snapshot name"),
+    limit: int = typer.Option(None, help="Limit number of rows to fetch"),
+):
+    """Download HTML via HTTP Range (no full WARC download)."""
+    settings, conn = _connect()
+    downloader.download_missing_ranges(settings, conn, snapshot=snapshot, limit=limit)
 
 
 @cli.command("stats")

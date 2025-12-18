@@ -1,6 +1,6 @@
 # OSCAR Tatar HTML Extractor
 
-This project automates the extraction of Tatar-language HTML pages from the OSCAR Common Crawl derived dataset. It orchestrates the workflow end-to-end: discovering snapshot manifests on Hugging Face, cross-referencing Common Crawl indexes to locate raw WARC segments, downloading HTML content, and exporting curated records to Apache Parquet.
+This project automates the extraction of Tatar-language HTML pages from the OSCAR Common Crawl derived dataset. It orchestrates the workflow end-to-end: discovering snapshot manifests on Hugging Face, resolving Common Crawl offsets via local CDX shards, downloading WARC files, and extracting original HTML.
 
 ## Features
 
@@ -36,84 +36,53 @@ hf:
 
 ## CLI Overview
 
-The entry point is `python -m src.main`. All data artifacts (snapshots index, per-snapshot JSON, downloaded HTML, exported Parquet) default to the work directory `~/.oscar/`.
+Entry point: `python -m app.cli`. Default workdir: `~/.oscar` (override via `config.yaml` or `OSCAR_APP_DIR`). Key commands:
 
-### 1. Index snapshot files
+1) Ingest OSCAR shards into SQLite  
+`python -m app.cli ingest`
 
-Lists relevant files in the Hugging Face dataset, storing results in `~/.oscar/snapshots.json`.
+1) Resolve offsets via local CDX shards (no rate limits)  
+`python -m app.cli resolve-offsets-local --snapshot CC-MAIN-2014-42`  
+Downloads `indexes/cdx-*.gz` to `~/.oscar/app/indexes/<snapshot>/` (cached), scans locally, and updates offsets/filenames.
 
-```bash
-python -m src.main index_snapshot_files
-```
+1) Prepare WARC path list for cc-downloader  
+`python -m app.cli prepare-downloads`
 
-### 2. Extract URIs from OSCAR shards
+1) Download WARC files (bundled cc-downloader binary, patched to auto-detect plain/gz path files)  
+`python -m app.cli download-warcs`
 
-Downloads each ZST shard, extracts `warc-target-uri` and metadata, and stores per-snapshot JSON under `~/.oscar/related_files/`.
+1b) Download HTML via HTTP Range (skip full WARCs, resumable)  
+`python -m app.cli download-ranges [--snapshot SNAP] [--limit N]`
 
-```bash
-python -m src.main collect_uris
-```
+1c) Download a single WARC byte range (ad hoc)  
+`python -m app.cli download-range <filename> <offset> <length> [--dest OUT]`
 
-### 3. Resolve offsets via Common Crawl index
+1) Extract HTML from downloaded WARCs  
+`python -m app.cli extract-html`
 
-Streams Common Crawl index paths, locating `offset`, `length`, and `filename` matches for each URI. Progress persists to `snapshots.json` and the per-snapshot JSON files.
-
-```bash
-python -m src.main collect_offsets
-```
-
-### 4. Download HTML bodies
-
-Per snapshot, range-requests the WARC segment from Common Crawl, extracts the HTTP response, heals malformed HTML, and saves files under `~/.oscar/html/<snapshot_id>/`.
-
-```bash
-python -m src.main download
-```
-
-### 5. Fill remaining gaps (optional)
-
-Uses the Common Crawl CDX API to backfill missing offsets/filenames that were not found in the index traversal. Adjust `--flush-every` for large batches.
-
-```bash
-python -m src.main fetch_missing --flush-every 50
-```
-
-### 6. Export to Parquet
-
-Reads the per-snapshot JSON + downloaded HTML files and writes one Parquet file per snapshot to `~/.oscar/parquet/`. Each row contains:
-
-| Column | Description |
-|--------|-------------|
-| `url` | Original URL (lower-cased) |
-| `offset` | Common Crawl byte offset |
-| `length` | Byte length of the response |
-| `filename` | WARC filename on Common Crawl |
-| `html` | Downloaded and healed HTML content |
-| `markdown` | HTML converted to markdown format using Trafilatura (with metadata) |
-
-```bash
-python -m src.main export_parquet
-```
+1) Progress snapshot  
+`python -m app.cli stats`
 
 ## Project Structure
 
 ```
-src/
-├── main.py        # Typer CLI entry point
-├── index.py       # Hugging Face snapshot discovery
-├── parse.py       # URI extraction & index matching
-├── download.py    # Common Crawl download logic
-├── export.py      # Parquet writer
-├── utils.py       # Config + snapshot IO helpers
-└── ...
+app/
+├── cli.py         # Typer entrypoint
+├── cdx.py         # Local CDX shard resolver
+├── downloader.py  # cc-downloader integration + HTML extraction
+├── hf.py          # Hugging Face shard listing
+├── ingest.py      # OSCAR shard ingest into SQLite
+├── db.py          # SQLite helpers
+└── config.py      # Settings loader (paths, tokens, cc-downloader)
 ```
 
-Persistent workspace (`~/.oscar/`):
+Persistent workspace (`~/.oscar/app/`):
 
-- `snapshots.json` – Global state per snapshot file
-- `related_files/*.json` – Per-snapshot URL metadata (offsets, filenames, download status)
-- `html/<snapshot_id>/` – Downloaded HTML documents
-- `parquet/<snapshot_id>.parquet` – Final exported datasets
+- `state.sqlite` – URLs, offsets, filenames, download status
+- `shards/` – Downloaded OSCAR shards
+- `indexes/<snapshot>/` – Cached CDX shards (safe to delete after resolving)
+- `warc/` – Downloaded WARC files
+- `html/` – Extracted HTML documents
 
 ## Notes and Tips
 
@@ -126,5 +95,3 @@ Persistent workspace (`~/.oscar/`):
 ## License
 
 MIT
-
-

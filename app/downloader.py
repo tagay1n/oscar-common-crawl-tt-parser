@@ -1,9 +1,13 @@
+import io
 import os
+import random
 import subprocess
+import time
 import zlib
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
+import requests
 from rich import print
 from rich.progress import track
 from warcio.archiveiterator import ArchiveIterator
@@ -51,6 +55,43 @@ def safe_filename(url: str, digest: str | None) -> str:
     if digest:
         cleaned = f"{cleaned}_{digest}"
     return cleaned or (digest or "unknown")
+
+
+def download_range(
+    settings: Settings,
+    filename: str,
+    offset: int,
+    length: int,
+    dest: Optional[Path] = None,
+    chunk_size: int = 1024 * 1024,
+) -> Path:
+    """Download a byte range from a Common Crawl WARC file."""
+    if length <= 0 or offset < 0:
+        raise ValueError("offset must be >= 0 and length must be > 0")
+
+    # Build URL and destination path.
+    url = f"https://data.commoncrawl.org/{filename.lstrip('/')}"
+    end = offset + length - 1
+    dest = dest or (
+        settings.warc_dir
+        / "parts"
+        / f"{Path(filename).name}-{offset}-{end}.warc.gz"
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    headers = {"Range": f"bytes={offset}-{end}"}
+    tmp = dest.with_suffix(dest.suffix + ".part")
+
+    print(f"[cyan]Downloading range {offset}-{end} from {filename}[/cyan]")
+    with requests.get(url, headers=headers, stream=True, timeout=settings.cdx_timeout) as resp:
+        resp.raise_for_status()
+        with open(tmp, "wb") as fh:
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    fh.write(chunk)
+    tmp.replace(dest)
+    print(f"[green]Saved[/green] {dest}")
+    return dest
 
 
 def extract_html(settings: Settings, conn, limit: int | None = None) -> None:
@@ -106,3 +147,97 @@ def _extract_warc_file(settings: Settings, conn, warc_path: Path, rows: Iterable
             except Exception as e:
                 db.record_error(conn, row["id"], str(e))
                 print(f"[red]Failed {row['url_raw']}: {e}[/red]")
+
+
+def download_missing_ranges(
+    settings: Settings, conn, snapshot: str | None = None, limit: int | None = None
+) -> None:
+    rows = list(db.iter_pending_html(conn, snapshot=snapshot, limit=limit))
+    if not rows:
+        print("[yellow]No pending rows with offsets to download[/yellow]")
+        return
+
+    print(f"[cyan]Downloading {len(rows)} ranges via HTTP Range requests[/cyan]")
+    last_request = 0.0
+    for row in track(rows, description="Fetching ranges"):
+        try:
+            start = int(row["offset"])
+            length = int(row["length"])
+            end = start + length - 1
+            url = f"https://data.commoncrawl.org/{row['filename'].lstrip('/')}"
+            headers = {
+                "Range": f"bytes={start}-{end}",
+                "User-Agent": "tt-html-extractor/1.0 (+https://huggingface.co/yasalma)",
+            }
+
+            body: bytes | None = None
+            for attempt in range(settings.cdx_max_retries):
+                # Polite pacing with jitter to avoid CC rate limits.
+                now = time.time()
+                target = settings.cdx_min_delay + random.uniform(0, 0.5)
+                wait = target - (now - last_request)
+                if wait > 0:
+                    time.sleep(wait)
+                last_request = time.time()
+
+                try:
+                    resp = requests.get(
+                        url, headers=headers, stream=True, timeout=settings.cdx_timeout
+                    )
+                except requests.RequestException as e:
+                    sleep_for = 2 * (attempt + 1)
+                    print(f"[yellow]Network error {e}, sleeping {sleep_for}s[/yellow]")
+                    time.sleep(sleep_for)
+                    continue
+
+                if resp.status_code in (429, 503):
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            sleep_for = float(retry_after)
+                        except ValueError:
+                            sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
+                    else:
+                        sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
+                    print(f"[yellow]{resp.status_code} rate limit, sleeping {sleep_for:.1f}s[/yellow]")
+                    time.sleep(sleep_for)
+                    continue
+
+                if resp.status_code >= 500:
+                    sleep_for = 2 * (attempt + 1)
+                    print(f"[yellow]Server {resp.status_code}, sleeping {sleep_for}s[/yellow]")
+                    time.sleep(sleep_for)
+                    continue
+
+                if resp.status_code not in (200, 206):
+                    raise requests.HTTPError(
+                        f"Unexpected status {resp.status_code} for {url}"
+                    )
+
+                body = resp.content
+                break
+
+            if body is None:
+                raise RuntimeError("Exhausted retries for range download")
+            record = next(ArchiveIterator(io.BytesIO(body)))
+            payload = record.content_stream().read()
+            encoding = (
+                record.http_headers.get_header("Content-Encoding")
+                if record.http_headers
+                else None
+            )
+            if encoding and "gzip" in encoding.lower():
+                payload = zlib.decompress(payload, 16 + zlib.MAX_WBITS)
+
+            text = payload.decode("utf-8", errors="replace")
+            out_dir = settings.html_dir / row["snapshot_name"]
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_name = safe_filename(row["url_raw"], row["digest"]) + ".html"
+            out_path = out_dir / out_name
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+            db.mark_saved(conn, row["id"], str(out_path), status="downloaded")
+        except Exception as e:
+            db.record_error(conn, row["id"], str(e))
+            print(f"[red]Failed {row['url_raw']}: {e}[/red]")

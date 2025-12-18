@@ -197,6 +197,29 @@ def list_warc_filenames(conn: sqlite3.Connection) -> list[str]:
     return [row["filename"] for row in cur.fetchall()]
 
 
+def iter_pending_html(
+    conn: sqlite3.Connection, snapshot: str | None = None, limit: int | None = None
+):
+    sql = """
+    SELECT urls.*, snapshots.snapshot_name
+    FROM urls
+    JOIN snapshots ON snapshots.id = urls.snapshot_id
+    WHERE urls.filename IS NOT NULL
+      AND urls.offset IS NOT NULL
+      AND urls.length IS NOT NULL
+      AND urls.saved_path IS NULL
+    """
+    params: list = []
+    if snapshot:
+        sql += " AND snapshots.snapshot_name = ?"
+        params.append(snapshot)
+    sql += " ORDER BY urls.filename, urls.offset"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params)
+
+
 def urls_for_warc(conn: sqlite3.Connection, filename: str) -> Iterable[sqlite3.Row]:
     cur = conn.execute(
         """
