@@ -63,6 +63,9 @@ Downloads `indexes/cdx-*.gz` to `~/.oscar/app/indexes/<snapshot>/` (cached), sca
 1) Progress snapshot  
 `python -m app.cli stats`
 
+1) Export Parquet with markdown  
+`python -m app.cli export-parquet [--snapshot SNAP] [--limit N] [--split 1024]`
+
 ## Project Structure
 
 ```
@@ -89,7 +92,8 @@ Persistent workspace (`~/.oscar/app/`):
 - The Common Crawl requests can be bandwidth-heavy. Consider running `collect_offsets` and `download` in batches or with resumed snapshots.
 - HTML healing uses BeautifulSoup (`html5lib` parser) to tolerate malformed markup. Adjust `heal_html` if you need raw bytes or a different parser.
 - Markdown conversion is performed using Trafilatura with `output_format="markdown"` and `with_metadata=True`. If conversion fails for a document, the markdown field will be `None`.
-- Parquet export includes full HTML bodies and markdown by default; modify `export.export_snapshots_to_parquet` if you prefer to store references only.
+- Parquet export includes full HTML bodies and markdown by default; modify `export.export_parquet` if you prefer to store references only.
+- Output filenames drop the `CC-MAIN-` prefix. If `--split` is set, it is interpreted as megabytes and files are split per snapshot as `<snapshot>_part0000.parquet`, `<snapshot>_part0001.parquet`, etc.
 - If you interrupt the pipeline, re-running commands resumes where they left off thanks to the JSON state files.
 
 ## License

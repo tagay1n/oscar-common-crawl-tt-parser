@@ -4,7 +4,7 @@ from pathlib import Path
 import typer
 from rich import print
 
-from app import cdx, db, downloader, hf, ingest
+from app import cdx, db, downloader, export, hf, ingest
 from app.config import load_settings
 
 cli = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
@@ -111,6 +111,27 @@ def stats():
         f"[green]URLs:[/green] {row['total']} total, "
         f"{row['resolved']} resolved, {row['downloaded']} downloaded, "
         f"{row['errors']} errors"
+    )
+
+
+@cli.command("export-parquet")
+def export_parquet(
+    snapshot: str = typer.Option(None, help="Only export a specific snapshot name"),
+    limit: int = typer.Option(None, help="Limit number of rows to export"),
+    split: float = typer.Option(
+        None,
+        help="Max parquet file size in megabytes; "
+        "if omitted, write a single file per snapshot",
+    ),
+):
+    """Export saved HTML to Parquet with markdown conversion."""
+    settings, conn = _connect()
+    export.export_parquet(
+        settings,
+        conn,
+        snapshot=snapshot,
+        limit=limit,
+        split=split,
     )
 
 
