@@ -164,6 +164,39 @@ def snapshots_with_missing(conn: sqlite3.Connection) -> list[str]:
     return [row["snapshot_name"] for row in cur.fetchall()]
 
 
+def snapshots_with_saved(conn: sqlite3.Connection) -> list[str]:
+    cur = conn.execute(
+        """
+        SELECT DISTINCT snapshots.snapshot_name
+        FROM urls
+        JOIN snapshots ON snapshots.id = urls.snapshot_id
+        WHERE urls.saved_path IS NOT NULL
+        ORDER BY snapshots.snapshot_name
+        """
+    )
+    return [row["snapshot_name"] for row in cur.fetchall()]
+
+
+def iter_saved_rows(
+    conn: sqlite3.Connection, snapshot: str | None = None, limit: int | None = None
+):
+    sql = """
+    SELECT urls.*, snapshots.snapshot_name
+    FROM urls
+    JOIN snapshots ON snapshots.id = urls.snapshot_id
+    WHERE urls.saved_path IS NOT NULL
+    """
+    params: list = []
+    if snapshot:
+        sql += " AND snapshots.snapshot_name = ?"
+        params.append(snapshot)
+    sql += " ORDER BY urls.id"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params)
+
+
 def update_offset(
     conn: sqlite3.Connection,
     url_id: int,

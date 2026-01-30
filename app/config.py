@@ -18,6 +18,7 @@ class Settings:
     index_dir: Path
     warc_dir: Path
     html_dir: Path
+    parquet_dir: Path
     cc_binary: Path
     cc_threads: int
     cdx_min_delay: float
@@ -46,8 +47,9 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
     index_dir = workdir / "indexes"
     warc_dir = workdir / "warc"
     html_dir = workdir / "html"
+    parquet_dir = workdir / "parquet"
     db_path = workdir / "state.sqlite"
-    for path in (workdir, shard_dir, index_dir, warc_dir, html_dir):
+    for path in (workdir, shard_dir, index_dir, warc_dir, html_dir, parquet_dir):
         path.mkdir(parents=True, exist_ok=True)
 
     cc_cfg = config.get("cc_downloader", {}) or {}
@@ -68,6 +70,7 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
         index_dir=index_dir,
         warc_dir=warc_dir,
         html_dir=html_dir,
+        parquet_dir=parquet_dir,
         cc_binary=cc_binary,
         cc_threads=cc_threads,
         cdx_min_delay=cdx_min_delay,
