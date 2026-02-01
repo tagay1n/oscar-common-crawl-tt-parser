@@ -1,3 +1,5 @@
+"""SQLite helpers for snapshot metadata and URL state."""
+
 import sqlite3
 from pathlib import Path
 from typing import Iterable, Sequence

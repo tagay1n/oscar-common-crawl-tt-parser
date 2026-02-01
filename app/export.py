@@ -1,3 +1,5 @@
+"""Export saved HTML rows to Parquet with optional size splitting."""
+
 from pathlib import Path
 from typing import Optional
 

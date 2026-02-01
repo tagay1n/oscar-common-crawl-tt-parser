@@ -1,3 +1,5 @@
+"""Hugging Face shard discovery and download helpers."""
+
 from pathlib import Path
 from typing import List
 

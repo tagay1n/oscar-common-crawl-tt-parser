@@ -1,3 +1,5 @@
+"""Typer CLI entrypoints for the OSCAR extraction workflow."""
+
 import sqlite3
 from pathlib import Path
 

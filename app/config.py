@@ -1,3 +1,5 @@
+"""Configuration loader and derived on-disk paths for the app."""
+
 import os
 from dataclasses import dataclass
 from pathlib import Path

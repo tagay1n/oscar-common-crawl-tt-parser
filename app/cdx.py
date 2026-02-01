@@ -1,3 +1,5 @@
+"""Resolve Common Crawl offsets via CDX API calls or local shard scans."""
+
 import gzip
 import io
 import json

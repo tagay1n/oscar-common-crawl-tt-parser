@@ -1,1 +1,1 @@
-# OSCAR extractor app package
+"""OSCAR extractor package modules."""

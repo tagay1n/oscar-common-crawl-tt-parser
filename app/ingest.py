@@ -1,3 +1,5 @@
+"""Ingest OSCAR TT shards into SQLite with URL normalization."""
+
 import io
 import json
 from datetime import datetime, timezone
