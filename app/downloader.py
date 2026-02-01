@@ -1,7 +1,6 @@
 """Download WARC data and extract HTML from Common Crawl."""
 
 import io
-import os
 import random
 import subprocess
 import time
