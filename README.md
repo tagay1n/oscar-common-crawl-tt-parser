@@ -15,7 +15,7 @@ This project automates the extraction of Tatar-language HTML pages from the OSCA
 ## Installation
 
 ```bash
-git clone https://github.com/<your-user>/oscar-corpus-extractor.git
+git clone https://github.com/tagay1n/tat-data-parser.git oscar-corpus-extractor
 cd oscar-corpus-extractor
 python -m venv .venv
 source .venv/bin/activate
@@ -24,15 +24,21 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Copy `config.yaml` to provide a Hugging Face access token and the target dataset:
+Set your Hugging Face access token and target dataset in `config.yaml`:
 
 ```yaml
 hf:
-  token: YOUR_HF_TOKEN
+  token: ""
   repo: oscar-corpus/community-oscar
 ```
 
-> The token must have access to the OSCAR community dataset and enough bandwidth to download snapshot manifests.
+Then provide the token via environment variable:
+
+```bash
+export HF_TOKEN=YOUR_HF_TOKEN
+```
+
+> Keep secrets out of git history. Do not commit real tokens in `config.yaml`.
 
 ## CLI Overview
 
@@ -43,7 +49,7 @@ Entry point: `python -m app.cli`. Default workdir: `~/.oscar` (override via `con
 
 1) Resolve offsets via local CDX shards (no rate limits)  
 `python -m app.cli resolve-offsets-local --snapshot CC-MAIN-2014-42`  
-Downloads `indexes/cdx-*.gz` to `~/.oscar/app/indexes/<snapshot>/` (cached), scans locally, and updates offsets/filenames.
+Downloads `indexes/cdx-*.gz` to `~/.oscar/indexes/<snapshot>/` (cached), scans locally, and updates offsets/filenames.
 
 1) Prepare WARC path list for cc-downloader  
 `python -m app.cli prepare-downloads`
