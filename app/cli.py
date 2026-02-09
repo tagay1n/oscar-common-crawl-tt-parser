@@ -12,6 +12,7 @@ cli = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 
 def _connect():
+    """Load settings, open SQLite, and ensure schema availability."""
     settings = load_settings()
     conn = db.get_connection(settings.db_path)
     db.init_db(conn)

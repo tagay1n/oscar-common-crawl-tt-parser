@@ -24,6 +24,8 @@ CDX_CHUNK_SIZE = 1024 * 1024
 
 @dataclass
 class CDXMatch:
+    """Resolved Common Crawl location for a single URL capture."""
+
     filename: str
     offset: int
     length: int
@@ -32,6 +34,8 @@ class CDXMatch:
 
 @dataclass
 class RowState:
+    """Mutable match state while scanning local CDX shards."""
+
     id: int
     warc_date: int | None
     filename: str | None
@@ -41,12 +45,16 @@ class RowState:
 
 
 class RateLimiter:
+    """Simple wall-clock throttler with optional random jitter."""
+
     def __init__(self, min_interval: float, jitter: float = 0.5):
+        """Configure base delay and jitter applied before requests."""
         self.min_interval = min_interval
         self.jitter = jitter
         self.last = 0.0
 
     def wait(self) -> None:
+        """Sleep until the next request is allowed."""
         now = time.time()
         # Add a small random jitter so we do not always hit CDX on a fixed cadence.
         target_interval = self.min_interval + random.uniform(0, self.jitter)
@@ -57,6 +65,7 @@ class RateLimiter:
 
 
 def _parse_line(line: str) -> Optional[dict]:
+    """Parse the JSON payload from one CDXJ line."""
     # CDXJ lines look like: "<urlkey> <timestamp> <json>"
     # We extract the JSON portion and parse that.
     try:
@@ -70,6 +79,7 @@ def _parse_line(line: str) -> Optional[dict]:
 
 
 def _choose_best(items: Iterable[dict], warc_date: int | None) -> Optional[CDXMatch]:
+    """Pick the best CDX record, preferring HTML and nearest timestamp."""
     filtered = []
     for it in items:
         if not (it.get("filename") and it.get("offset") and it.get("length")):
@@ -99,6 +109,7 @@ def _choose_best(items: Iterable[dict], warc_date: int | None) -> Optional[CDXMa
 
 
 def _ts(value: str | None) -> int:
+    """Parse a CDX timestamp string into epoch seconds."""
     if not value:
         return 0
     try:
@@ -108,6 +119,7 @@ def _ts(value: str | None) -> int:
 
 
 def _cdx_record_to_match(obj: dict) -> Optional[CDXMatch]:
+    """Convert one parsed CDX object into `CDXMatch` when valid."""
     if not (obj.get("filename") and obj.get("offset") and obj.get("length")):
         return None
 
@@ -124,6 +136,7 @@ def _cdx_record_to_match(obj: dict) -> Optional[CDXMatch]:
 
 
 def _better_match(current: Optional[CDXMatch], candidate: CDXMatch, warc_date: int | None) -> bool:
+    """Return True if candidate should replace current for the target date."""
     if current is None:
         return True
     if warc_date:
@@ -178,6 +191,7 @@ def _list_snapshot_shards(
 
 
 def _download_shard(settings: Settings, session: Session, url: str, dest: Path) -> None:
+    """Download a single CDX shard to disk atomically."""
     tmp = dest.with_suffix(dest.suffix + ".part")
     with session.get(url, stream=True, timeout=settings.cdx_timeout) as resp:
         resp.raise_for_status()
@@ -191,6 +205,7 @@ def _download_shard(settings: Settings, session: Session, url: str, dest: Path) 
 def _ensure_snapshot_shards(
     settings: Settings, session: Session, snapshot_name: str
 ) -> list[Path]:
+    """Ensure all shard files for a snapshot exist locally and return paths."""
     target_dir = settings.index_dir / snapshot_name
     print(f"[cyan]Gathering shard list for snapshot {snapshot_name}[/cyan]")
     shards, missing, all_paths = _list_snapshot_shards(
@@ -217,6 +232,12 @@ def lookup_url(
     warc_date: int | None,
     limiter: RateLimiter,
 ) -> Optional[CDXMatch]:
+    """Resolve one URL via the online CDX API with retry/backoff behavior.
+
+    Requests are rate-limited and retried on network errors, rate limits, and
+    transient server failures. On success, the response lines are parsed and the
+    best match is selected using MIME filtering and timestamp proximity.
+    """
     base = f"https://index.commoncrawl.org/{snapshot_name}-index"
     params = {
         "url": url,
@@ -270,6 +291,12 @@ def lookup_url(
 
 
 def resolve_missing(settings: Settings, conn, limit: int | None = None) -> None:
+    """Resolve unresolved rows via CDX API queries and persist match results.
+
+    For each row, the resolver tries multiple URL candidates (raw, lowercase,
+    normalized), memoizes lookups per `(snapshot, url)` to reduce duplicate API
+    requests, and writes either matched offsets or `missing` status back to SQLite.
+    """
     cache: dict[tuple[str, str], Optional[CDXMatch]] = {}
     limiter = RateLimiter(settings.cdx_min_delay)
 
@@ -321,6 +348,7 @@ def resolve_missing(settings: Settings, conn, limit: int | None = None) -> None:
 
 
 def _build_candidate_index(rows: list[dict]) -> tuple[list[RowState], dict[str, list[RowState]]]:
+    """Build row states and reverse index from candidate URL to rows."""
     states: list[RowState] = []
     candidates: dict[str, list[RowState]] = {}
     for row in rows:
@@ -349,6 +377,7 @@ def _build_candidate_index(rows: list[dict]) -> tuple[list[RowState], dict[str, 
 
 
 def _scan_shard(shard: Path, candidates: dict[str, list[RowState]]) -> None:
+    """Scan one local CDX shard and update candidate row matches in place."""
     with gzip.open(shard, "rt", encoding="utf-8", errors="ignore") as f:
         for line in f:
             obj = _parse_line(line)
@@ -371,6 +400,13 @@ def _scan_shard(shard: Path, candidates: dict[str, list[RowState]]) -> None:
 def resolve_missing_local(
     settings: Settings, conn, snapshot: str | None = None, limit: int | None = None
 ) -> None:
+    """Resolve missing offsets by scanning locally cached CDX shards.
+
+    The resolver iterates target snapshots, ensures shard files are available,
+    builds a candidate URL index for unresolved rows, scans every shard for
+    matching CDX records, chooses best matches per row using timestamp proximity,
+    and writes final matched/missing statuses into SQLite.
+    """
     remaining = limit
     snapshots = [snapshot] if snapshot else db.snapshots_with_missing(conn)
     print(f"All snapshots: {snapshots}")

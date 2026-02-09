@@ -12,6 +12,8 @@ DEFAULT_WORKDIR = Path(os.environ.get("OSCAR_APP_DIR", Path.home() / ".oscar")).
 
 @dataclass
 class Settings:
+    """Runtime configuration and derived filesystem locations."""
+
     hf_token: str
     hf_repo: str
     workdir: Path
@@ -29,7 +31,13 @@ class Settings:
 
 
 def load_settings(config_path: str = "config.yaml") -> Settings:
-    """Load settings from YAML and environment with safe defaults."""
+    """Load and validate runtime settings, then ensure required directories exist.
+
+    Values come from `config.yaml` with environment fallback for secrets. The
+    function also derives standard working paths under the configured app
+    directory and creates them eagerly so downstream commands can assume the
+    layout is present.
+    """
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
 

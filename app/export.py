@@ -14,6 +14,7 @@ from app.config import Settings
 
 
 def _read_html(path: Path) -> str | None:
+    """Read UTF-8 HTML content from disk, returning None if missing."""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
@@ -21,6 +22,7 @@ def _read_html(path: Path) -> str | None:
 
 
 def _parse_split_mb(value: str | int | float) -> int:
+    """Parse the split threshold in megabytes into bytes."""
     try:
         mb = float(value)
     except (TypeError, ValueError):
@@ -31,6 +33,7 @@ def _parse_split_mb(value: str | int | float) -> int:
 
 
 def _snapshot_basename(snapshot: str) -> str:
+    """Convert `CC-MAIN-YYYY-NN` to `YYYY-NN` for file naming."""
     prefix = "CC-MAIN-"
     if snapshot.startswith(prefix):
         return snapshot[len(prefix) :]
@@ -44,6 +47,13 @@ def export_parquet(
     limit: Optional[int] = None,
     split: Optional[str] = None,
 ) -> None:
+    """Export saved HTML rows into parquet, optionally split by file size.
+
+    The exporter iterates saved rows per snapshot, reads local HTML, generates
+    markdown with trafilatura, and writes batched records through a Parquet
+    writer. When `split` is provided, it rolls over to numbered part files once
+    the current output file reaches the requested size.
+    """
     max_bytes = _parse_split_mb(split) if split else None
     snapshots = [snapshot] if snapshot else db.snapshots_with_saved(conn)
     if not snapshots:
@@ -87,6 +97,7 @@ def export_parquet(
         )
 
         def _open_writer(index: int) -> tuple[pq.ParquetWriter, Path]:
+            """Create a parquet writer for the current part index."""
             if max_bytes:
                 path = settings.parquet_dir / f"{base_name}_part{index:04d}.parquet"
             else:
@@ -95,6 +106,7 @@ def export_parquet(
             return pq.ParquetWriter(path, schema), path
 
         def _flush() -> None:
+            """Write buffered records and rotate files when split threshold is hit."""
             nonlocal writer, out_path, part_index, records
             if not records:
                 return

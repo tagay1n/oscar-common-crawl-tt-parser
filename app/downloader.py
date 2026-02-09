@@ -18,6 +18,7 @@ from app.config import Settings
 
 
 def write_path_file(settings: Settings, conn, path_file: Path) -> int:
+    """Write unique WARC filenames to a path list file for cc-downloader."""
     filenames = db.list_warc_filenames(conn)
     if not filenames:
         print("[yellow]No WARC filenames ready for download[/yellow]")
@@ -32,6 +33,7 @@ def write_path_file(settings: Settings, conn, path_file: Path) -> int:
 
 
 def run_cc_downloader(settings: Settings, path_file: Path) -> None:
+    """Run the bundled cc-downloader binary against a prepared path list."""
     if not path_file.exists():
         raise FileNotFoundError(f"Path file not found: {path_file}")
     if not settings.cc_binary.exists():
@@ -51,6 +53,7 @@ def run_cc_downloader(settings: Settings, path_file: Path) -> None:
 
 
 def safe_filename(url: str, digest: str | None) -> str:
+    """Build a filesystem-safe name from URL and optional digest."""
     cleaned = "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in url)
     cleaned = cleaned.strip("_")[:150]
     if digest:
@@ -96,6 +99,11 @@ def download_range(
 
 
 def extract_html(settings: Settings, conn, limit: int | None = None) -> None:
+    """Extract HTML for resolved rows from downloaded WARC files.
+
+    The function groups pending rows by WARC filename, verifies each archive is
+    present locally, and delegates record-level extraction to `_extract_warc_file`.
+    """
     filenames = db.list_warc_filenames(conn)
     if limit:
         filenames = filenames[:limit]
@@ -118,6 +126,12 @@ def extract_html(settings: Settings, conn, limit: int | None = None) -> None:
 
 
 def _extract_warc_file(settings: Settings, conn, warc_path: Path, rows: Iterable) -> None:
+    """Read targeted records from a WARC file and persist HTML outputs.
+
+    For each row, it seeks to the stored offset, parses one WARC record,
+    validates the target URL, decodes/decompresses payload content when needed,
+    writes HTML to snapshot-scoped output directories, and updates SQLite status.
+    """
     with open(warc_path, "rb") as fh:
         for row in track(rows, description=warc_path.name):
             try:
@@ -153,6 +167,12 @@ def _extract_warc_file(settings: Settings, conn, warc_path: Path, rows: Iterable
 def download_missing_ranges(
     settings: Settings, conn, snapshot: str | None = None, limit: int | None = None
 ) -> None:
+    """Fetch unresolved records directly via HTTP Range with retry/backoff logic.
+
+    This path avoids downloading full WARC files: each row requests only its
+    byte range, handles transient network/rate-limit/server failures, decodes the
+    embedded response payload, and stores extracted HTML plus per-row status.
+    """
     rows = list(db.iter_pending_html(conn, snapshot=snapshot, limit=limit))
     if not rows:
         print("[yellow]No pending rows with offsets to download[/yellow]")

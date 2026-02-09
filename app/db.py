@@ -6,6 +6,7 @@ from typing import Iterable, Sequence
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
+    """Open a SQLite connection configured for this workflow."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -14,6 +15,7 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    """Create schema objects if they do not already exist."""
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS snapshots (
@@ -52,6 +54,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 
 def ensure_snapshot(conn: sqlite3.Connection, hf_path: str, snapshot_name: str) -> int:
+    """Insert or update a snapshot row and return its id."""
     cur = conn.execute(
         """
         INSERT INTO snapshots (hf_path, snapshot_name)
@@ -70,6 +73,7 @@ def ensure_snapshot(conn: sqlite3.Connection, hf_path: str, snapshot_name: str) 
 def insert_urls(
     conn: sqlite3.Connection, snapshot_id: int, rows: Sequence[dict], batch_size: int = 500
 ) -> int:
+    """Batch insert URL rows for one snapshot, ignoring duplicates."""
     inserted = 0
     for start in range(0, len(rows), batch_size):
         chunk = rows[start : start + batch_size]
@@ -91,6 +95,7 @@ def insert_urls(
 def mark_snapshot_imported(
     conn: sqlite3.Connection, snapshot_id: int, total_urls: int, imported_at: str
 ) -> None:
+    """Mark a snapshot as imported and store import stats."""
     conn.execute(
         """
         UPDATE snapshots
@@ -103,6 +108,7 @@ def mark_snapshot_imported(
 
 
 def iter_missing_offsets(conn: sqlite3.Connection, limit: int | None = None):
+    """Iterate rows that still need filename/offset/length metadata."""
     sql = """
     SELECT
         urls.id,
@@ -129,6 +135,7 @@ def iter_missing_offsets(conn: sqlite3.Connection, limit: int | None = None):
 def iter_missing_offsets_for_snapshot(
     conn: sqlite3.Connection, snapshot_name: str, limit: int | None = None
 ):
+    """Iterate unresolved rows for a single snapshot."""
     sql = """
     SELECT
         urls.id,
@@ -154,6 +161,7 @@ def iter_missing_offsets_for_snapshot(
 
 
 def snapshots_with_missing(conn: sqlite3.Connection) -> list[str]:
+    """List snapshot names that still have unresolved offsets."""
     cur = conn.execute(
         """
         SELECT DISTINCT snapshots.snapshot_name
@@ -167,6 +175,7 @@ def snapshots_with_missing(conn: sqlite3.Connection) -> list[str]:
 
 
 def snapshots_with_saved(conn: sqlite3.Connection) -> list[str]:
+    """List snapshot names with extracted HTML saved on disk."""
     cur = conn.execute(
         """
         SELECT DISTINCT snapshots.snapshot_name
@@ -182,6 +191,7 @@ def snapshots_with_saved(conn: sqlite3.Connection) -> list[str]:
 def iter_saved_rows(
     conn: sqlite3.Connection, snapshot: str | None = None, limit: int | None = None
 ):
+    """Iterate rows that already have a saved HTML path."""
     sql = """
     SELECT urls.*, snapshots.snapshot_name
     FROM urls
@@ -207,6 +217,7 @@ def update_offset(
     length: int | None,
     status: str,
 ) -> None:
+    """Persist resolved location metadata for one URL row."""
     conn.execute(
         """
         UPDATE urls
@@ -219,6 +230,7 @@ def update_offset(
 
 
 def list_warc_filenames(conn: sqlite3.Connection) -> list[str]:
+    """Return distinct WARC filenames that are ready for processing."""
     cur = conn.execute(
         """
         SELECT DISTINCT filename
@@ -235,6 +247,7 @@ def list_warc_filenames(conn: sqlite3.Connection) -> list[str]:
 def iter_pending_html(
     conn: sqlite3.Connection, snapshot: str | None = None, limit: int | None = None
 ):
+    """Iterate rows ready for HTML extraction but not yet saved."""
     sql = """
     SELECT urls.*, snapshots.snapshot_name
     FROM urls
@@ -256,6 +269,7 @@ def iter_pending_html(
 
 
 def urls_for_warc(conn: sqlite3.Connection, filename: str) -> Iterable[sqlite3.Row]:
+    """Fetch pending rows associated with one WARC file."""
     cur = conn.execute(
         """
         SELECT urls.*, snapshots.snapshot_name
@@ -272,6 +286,7 @@ def urls_for_warc(conn: sqlite3.Connection, filename: str) -> Iterable[sqlite3.R
 
 
 def mark_saved(conn: sqlite3.Connection, url_id: int, path: str, status: str) -> None:
+    """Record the saved HTML path and clear prior error state."""
     conn.execute(
         """
         UPDATE urls
@@ -284,6 +299,7 @@ def mark_saved(conn: sqlite3.Connection, url_id: int, path: str, status: str) ->
 
 
 def record_error(conn: sqlite3.Connection, url_id: int, message: str) -> None:
+    """Store a truncated error message for a failed row."""
     conn.execute(
         """
         UPDATE urls

@@ -16,6 +16,7 @@ from app.hf import download_shard, snapshot_name_from_path
 
 
 def parse_warc_date(value: str | None) -> int | None:
+    """Convert a WARC UTC timestamp string to epoch seconds."""
     if not value:
         return None
     try:
@@ -26,6 +27,12 @@ def parse_warc_date(value: str | None) -> int | None:
 
 
 def ingest_shard(settings: Settings, conn, hf_path: str, force: bool = False) -> None:
+    """Stream-ingest one compressed shard and upsert normalized URL metadata.
+
+    The function skips already imported shards unless `force` is set, parses
+    records in a streaming fashion to limit memory use, batches SQLite inserts,
+    and records ingestion status/metrics on completion.
+    """
     snapshot_name = snapshot_name_from_path(hf_path)
     snapshot_id = db.ensure_snapshot(conn, hf_path, snapshot_name)
 

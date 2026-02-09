@@ -10,6 +10,7 @@ from app.config import Settings
 
 
 def list_tt_meta_files(settings: Settings) -> List[str]:
+    """List and filter TT metadata shard paths from the configured dataset repo."""
     print("[cyan]Listing tt_meta shards from Hugging Face...[/cyan]")
     files = list_repo_files(
         settings.hf_repo, repo_type="dataset", token=settings.hf_token
@@ -35,7 +36,7 @@ def download_shard(settings: Settings, filename: str) -> Path:
 
 
 def snapshot_name_from_path(hf_path: str) -> str:
-    """Best-effort snapshot name extraction."""
+    """Extract a Common Crawl snapshot name from a shard path."""
     parts = Path(hf_path).parts
     for part in parts:
         if part.startswith("CC-MAIN-"):
