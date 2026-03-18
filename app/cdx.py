@@ -56,13 +56,13 @@ class RateLimiter:
 
     def wait(self) -> None:
         """Sleep until the next request is allowed."""
-        now = time.time()
+        now = time.monotonic()
         # Add a small random jitter so we do not always hit CDX on a fixed cadence.
         target_interval = self.min_interval + random.uniform(0, self.jitter)
         wait = target_interval - (now - self.last)
         if wait > 0:
             time.sleep(wait)
-        self.last = time.time()
+        self.last = time.monotonic()
 
 
 def _parse_line(line: str) -> Optional[dict]:
@@ -83,10 +83,7 @@ def _choose_best(items: Iterable[dict], warc_date: int | None) -> Optional[CDXMa
     """Pick the best CDX record, preferring HTML and nearest timestamp."""
     filtered = []
     for it in items:
-        if not (it.get("filename") and it.get("offset") and it.get("length")):
-            continue
-        mt = str(it.get("mimetype") or "").lower()
-        if mt and "html" not in mt:
+        if not _is_html_capture_record(it):
             continue
         filtered.append(it)
 
@@ -121,17 +118,18 @@ def _ts(value: str | None) -> int:
 
 def _cdx_record_to_match(obj: dict) -> Optional[CDXMatch]:
     """Convert one parsed CDX object into `CDXMatch` when valid."""
-    if not (obj.get("filename") and obj.get("offset") and obj.get("length")):
+    if not _is_html_capture_record(obj):
         return None
-
-    mt = str(obj.get("mimetype") or obj.get("mime") or "").lower()
-    if mt and "html" not in mt:
+    try:
+        offset = int(obj["offset"])
+        length = int(obj["length"])
+    except (TypeError, ValueError):
         return None
 
     return CDXMatch(
         filename=obj["filename"],
-        offset=int(obj["offset"]),
-        length=int(obj["length"]),
+        offset=offset,
+        length=length,
         timestamp=_ts(obj.get("timestamp")),
     )
 
@@ -148,6 +146,31 @@ def _better_match(current: Optional[CDXMatch], candidate: CDXMatch, warc_date: i
         if candidate_delta > current_delta:
             return False
     return False
+
+
+def _is_html_capture_record(obj: dict) -> bool:
+    """Return True when record has location fields and HTML-like mimetype."""
+    if obj.get("filename") in (None, ""):
+        return False
+    if obj.get("offset") in (None, ""):
+        return False
+    if obj.get("length") in (None, ""):
+        return False
+    mt = str(obj.get("mimetype") or obj.get("mime") or "").lower()
+    return not mt or "html" in mt
+
+
+def _url_candidates(url_raw: str | None, url_norm: str | None) -> list[str]:
+    """Build ordered URL lookup candidates from raw and normalized values."""
+    candidates: list[str] = []
+    if url_raw:
+        candidates.append(url_raw)
+        lower = url_raw.lower()
+        if lower != url_raw:
+            candidates.append(lower)
+    if url_norm and url_norm not in candidates:
+        candidates.append(url_norm)
+    return candidates
 
 
 def _list_snapshot_shards(
@@ -320,14 +343,7 @@ def resolve_missing(settings: Settings, conn, limit: int | None = None) -> None:
             loop = row_iter()
         for row in loop:
             snapshot_name = row["snapshot_name"]
-            candidates = []
-            if row["url_raw"]:
-                candidates.append(row["url_raw"])
-                lower = row["url_raw"].lower()
-                if lower != row["url_raw"]:
-                    candidates.append(lower)
-            if row["url_norm"] and row["url_norm"] not in candidates:
-                candidates.append(row["url_norm"])
+            candidates = _url_candidates(row["url_raw"], row["url_norm"])
 
             match: Optional[CDXMatch] = None
             for cand in candidates:
@@ -388,16 +404,7 @@ def _build_candidate_index(rows: list[dict]) -> tuple[list[RowState], dict[str, 
         )
         states.append(state)
 
-        urls: list[str] = []
-        if row["url_raw"]:
-            urls.append(row["url_raw"])
-            lower = row["url_raw"].lower()
-            if lower != row["url_raw"]:
-                urls.append(lower)
-        if row["url_norm"] and row["url_norm"] not in urls:
-            urls.append(row["url_norm"])
-
-        for url in urls:
+        for url in _url_candidates(row["url_raw"], row["url_norm"]):
             candidates.setdefault(url, []).append(state)
 
     return states, candidates

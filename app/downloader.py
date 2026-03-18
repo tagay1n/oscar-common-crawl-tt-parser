@@ -108,7 +108,7 @@ def extract_html(settings: Settings, conn, limit: int | None = None) -> None:
     present locally, and delegates record-level extraction to `_extract_warc_file`.
     """
     filenames = db.list_warc_filenames(conn)
-    if limit:
+    if limit is not None:
         filenames = filenames[:limit]
     if not filenames:
         print("[yellow]No filenames with offsets to extract[/yellow]")
@@ -221,7 +221,7 @@ def download_missing_ranges(
                 body: bytes | None = None
                 last_failure = "unknown transient failure"
                 for attempt in range(settings.cdx_max_retries):
-                    now = time.time()
+                    now = time.monotonic()
                     if global_cooldown_until > now:
                         cooldown_wait = global_cooldown_until - now
                         print(
@@ -230,12 +230,12 @@ def download_missing_ranges(
                         time.sleep(cooldown_wait)
 
                     # Polite pacing with jitter to avoid CC rate limits.
-                    now = time.time()
+                    now = time.monotonic()
                     target = settings.cdx_min_delay + random.uniform(0, 0.5)
                     wait = target - (now - last_request)
                     if wait > 0:
                         time.sleep(wait)
-                    last_request = time.time()
+                    last_request = time.monotonic()
 
                     try:
                         with session.get(
@@ -257,7 +257,7 @@ def download_missing_ranges(
                                     )
                                     global_cooldown_until = max(
                                         global_cooldown_until,
-                                        time.time() + extra,
+                                        time.monotonic() + extra,
                                     )
 
                                 last_failure = (
@@ -285,7 +285,7 @@ def download_missing_ranges(
                                     )
                                     global_cooldown_until = max(
                                         global_cooldown_until,
-                                        time.time() + extra,
+                                        time.monotonic() + extra,
                                     )
                                 last_failure = f"server HTTP {resp.status_code} for {url}"
                                 print(

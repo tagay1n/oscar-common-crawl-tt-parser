@@ -137,6 +137,38 @@ class DbHelpersTests(unittest.TestCase):
         self.assertEqual(len(warc_rows), 1)
         self.assertEqual(warc_rows[0]["id"], first_id)
 
+    def test_limit_zero_returns_no_rows_for_iterators(self) -> None:
+        snapshot_id = db.ensure_snapshot(self.conn, "path/shard-4", "CC-MAIN-2014-46")
+        db.insert_urls(
+            self.conn,
+            snapshot_id,
+            [
+                {
+                    "url_raw": "https://example.com/zero",
+                    "url_norm": "https://example.com/zero",
+                    "warc_date": 1,
+                    "warc_record_id": "rec-zero",
+                    "digest": "sha1:zero",
+                }
+            ],
+        )
+        row_id = self.conn.execute("SELECT id FROM urls").fetchone()["id"]
+        db.update_offset(self.conn, row_id, "crawl/z.warc.gz", 10, 20, "matched")
+
+        self.assertEqual(len(list(db.iter_missing_offsets(self.conn, limit=0))), 0)
+        self.assertEqual(
+            len(
+                list(
+                    db.iter_missing_offsets_for_snapshot(
+                        self.conn, "CC-MAIN-2014-46", limit=0
+                    )
+                )
+            ),
+            0,
+        )
+        self.assertEqual(len(list(db.iter_saved_rows(self.conn, limit=0))), 0)
+        self.assertEqual(len(list(db.iter_pending_html(self.conn, limit=0))), 0)
+
 
 class CdxShardScanTests(unittest.TestCase):
     """Validate shard scanning and in-memory candidate match updates."""

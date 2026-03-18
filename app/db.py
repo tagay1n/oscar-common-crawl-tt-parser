@@ -143,7 +143,7 @@ def iter_missing_offsets(conn: sqlite3.Connection, limit: int | None = None):
     WHERE (urls.offset IS NULL OR urls.length IS NULL OR urls.filename IS NULL)
     """
     params: list = []
-    if limit:
+    if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
     return conn.execute(sql, params)
@@ -171,7 +171,7 @@ def iter_missing_offsets_for_snapshot(
       AND snapshots.snapshot_name = ?
     """
     params: list = [snapshot_name]
-    if limit:
+    if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
     return conn.execute(sql, params)
@@ -220,7 +220,7 @@ def iter_saved_rows(
         sql += " AND snapshots.snapshot_name = ?"
         params.append(snapshot)
     sql += " ORDER BY urls.id"
-    if limit:
+    if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
     return conn.execute(sql, params)
@@ -281,7 +281,7 @@ def iter_pending_html(
         sql += " AND snapshots.snapshot_name = ?"
         params.append(snapshot)
     sql += " ORDER BY urls.filename, urls.offset"
-    if limit:
+    if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
     return conn.execute(sql, params)

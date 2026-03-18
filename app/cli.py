@@ -102,9 +102,9 @@ def stats():
         """
         SELECT
             COUNT(*) AS total,
-            SUM(filename IS NOT NULL) AS resolved,
-            SUM(saved_path IS NOT NULL) AS downloaded,
-            SUM(status = 'error') AS errors
+            COALESCE(SUM(filename IS NOT NULL), 0) AS resolved,
+            COALESCE(SUM(saved_path IS NOT NULL), 0) AS downloaded,
+            COALESCE(SUM(status = 'error'), 0) AS errors
         FROM urls
         """
     )

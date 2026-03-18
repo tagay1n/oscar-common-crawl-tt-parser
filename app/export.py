@@ -72,7 +72,7 @@ def export_parquet(
             """,
             (snap,),
         ).fetchone()["total"]
-        if limit:
+        if limit is not None:
             row_count = min(row_count, limit)
         if row_count == 0:
             print(f"[yellow]Snapshot {snap}: nothing to export[/yellow]")
