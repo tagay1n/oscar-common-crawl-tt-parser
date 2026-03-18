@@ -1,10 +1,10 @@
 PyYAML==6.0.3
-huggingface_hub==1.4.1
-pyarrow==23.0.0
+huggingface_hub==1.7.1
+pyarrow==23.0.1
 requests==2.32.5
-rich==14.3.2
+rich==14.3.3
 trafilatura==2.0.0
-typer==0.21.1
+typer==0.24.1
 urlcanon==0.3.1
 warcio==1.7.5
 zstandard==0.25.0

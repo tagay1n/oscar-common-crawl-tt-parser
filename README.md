@@ -6,9 +6,11 @@ This project automates the extraction of Tatar-language HTML pages from the OSCA
 
 - Indexes available Tatar snapshot files (`tt_meta*.jsonl.zst`) from the `oscar-corpus/community-oscar` Hugging Face dataset
 - Extracts target URIs and WARC metadata from OSCAR Zstandard-compressed JSONL shards
-- Resolves Common Crawl `offset`, `length`, and WARC `filename` via the CC index
-- Downloads HTML bodies by byte-range streaming from Common Crawl
-- Fills gaps using the Common Crawl CDX API for stubborn URLs
+- Resolves Common Crawl `offset`, `length`, and WARC `filename` via locally scanned CDX shards (`resolve-offsets-local`)
+- Supports an optional online CDX API resolver (`resolve-offsets`) when needed
+- Supports two download paths:
+  - full WARC download via bundled `cc-downloader` + local extraction
+  - direct HTTP Range fetch per record (`download-ranges`)
 - Exports per-snapshot Parquet files containing URL, offsets, filenames, HTML content, and markdown (via Trafilatura)
 - Provides status and troubleshooting helpers through a Typer CLI
 
@@ -24,15 +26,27 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Set your Hugging Face access token and target dataset in `config.yaml`:
+Set runtime options in `config.yaml`:
 
 ```yaml
 hf:
-  token: ""
+  token: ""   # optional if HF_TOKEN env var is set
   repo: oscar-corpus/community-oscar
+
+app:
+  workdir: ~/.oscar
+
+cc_downloader:
+  binary: cc-downloader/cc-downloader
+  threads: 2
+
+cdx:
+  min_delay: 1.5
+  max_retries: 4
+  timeout: 30
 ```
 
-Then provide the token via environment variable:
+Token can also be provided by environment variable:
 
 ```bash
 export HF_TOKEN=YOUR_HF_TOKEN
@@ -42,34 +56,37 @@ export HF_TOKEN=YOUR_HF_TOKEN
 
 ## CLI Overview
 
-Entry point: `python -m app.cli`. Default workdir: `~/.oscar` (override via `config.yaml` or `OSCAR_APP_DIR`). Key commands:
+Entry point: `python -m app.cli`. Default workdir: `~/.oscar` (override via `config.yaml` `app.workdir` or `OSCAR_APP_DIR`). Key commands:
 
-1) Ingest OSCAR shards into SQLite  
-`python -m app.cli ingest`
+1. Ingest OSCAR shards into SQLite  
+`python -m app.cli ingest [--force]`
 
-1) Resolve offsets via local CDX shards (no rate limits)  
+2. Resolve offsets via local CDX shards (preferred; no public API rate limits)  
 `python -m app.cli resolve-offsets-local --snapshot CC-MAIN-2014-42`  
 Downloads `indexes/cdx-*.gz` to `~/.oscar/indexes/<snapshot>/` (cached), scans locally, and updates offsets/filenames.
 
-1) Prepare WARC path list for cc-downloader  
+3. Optional fallback resolver via online CDX API  
+`python -m app.cli resolve-offsets [--limit N]`
+
+4. Prepare WARC path list for cc-downloader  
 `python -m app.cli prepare-downloads`
 
-1) Download WARC files (bundled cc-downloader binary, patched to auto-detect plain/gz path files)  
+5. Download WARC files (bundled cc-downloader binary)  
 `python -m app.cli download-warcs`
 
-1b) Download HTML via HTTP Range (skip full WARCs, resumable)  
+6. Download HTML via HTTP Range (skip full WARCs)  
 `python -m app.cli download-ranges [--snapshot SNAP] [--limit N]`
 
-1c) Download a single WARC byte range (ad hoc)  
+7. Download a single WARC byte range (ad hoc)  
 `python -m app.cli download-range <filename> <offset> <length> [--dest OUT]`
 
-1) Extract HTML from downloaded WARCs  
+8. Extract HTML from downloaded WARCs  
 `python -m app.cli extract-html`
 
-1) Progress snapshot  
+9. Progress snapshot  
 `python -m app.cli stats`
 
-1) Export Parquet with markdown  
+10. Export Parquet with markdown  
 `python -m app.cli export-parquet [--snapshot SNAP] [--limit N] [--split 1024]`
 
 ## Project Structure
@@ -92,6 +109,7 @@ Persistent workspace (`~/.oscar/`):
 - `shards/` – Downloaded OSCAR shards
 - `indexes/<snapshot>/` – Cached CDX shards (safe to delete after resolving)
 - `warc/` – Downloaded WARC files
+- `warc/parts/` – Optional single-range downloads from `download-range`
 - `html/` – Extracted HTML documents
 - `parquet/` – Exported Parquet files
 
