@@ -45,7 +45,8 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
         config = yaml.safe_load(f) or {}
 
     hf_cfg = config.get("hf", {}) or {}
-    token = hf_cfg.get("token") or os.environ.get("HF_TOKEN")
+    # Prefer environment token so local secrets can stay outside tracked files.
+    token = os.environ.get("HF_TOKEN") or hf_cfg.get("token")
     if not token:
         raise ValueError("Missing Hugging Face token (set hf.token or HF_TOKEN)")
 

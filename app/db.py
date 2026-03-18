@@ -48,6 +48,23 @@ def init_db(conn: sqlite3.Connection) -> None:
             ON urls(snapshot_id, url_raw);
         CREATE INDEX IF NOT EXISTS idx_urls_filename
             ON urls(filename);
+        CREATE INDEX IF NOT EXISTS idx_urls_status
+            ON urls(status);
+        CREATE INDEX IF NOT EXISTS idx_urls_saved_path
+            ON urls(saved_path);
+        CREATE INDEX IF NOT EXISTS idx_urls_snapshot_filename_offset
+            ON urls(snapshot_id, filename, offset);
+        CREATE INDEX IF NOT EXISTS idx_urls_unresolved_snapshot
+            ON urls(snapshot_id)
+            WHERE (offset IS NULL OR length IS NULL OR filename IS NULL);
+        CREATE INDEX IF NOT EXISTS idx_urls_ready_extract
+            ON urls(snapshot_id, filename, offset)
+            WHERE filename IS NOT NULL
+              AND offset IS NOT NULL
+              AND length IS NOT NULL
+              AND saved_path IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_snapshots_name
+            ON snapshots(snapshot_name);
         """
     )
     conn.commit()

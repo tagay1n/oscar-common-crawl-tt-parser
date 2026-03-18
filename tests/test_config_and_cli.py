@@ -40,6 +40,21 @@ class LoadSettingsTests(unittest.TestCase):
         self.assertEqual(settings.hf_token, "env-token")
         self.assertEqual(settings.hf_repo, "oscar-corpus/community-oscar")
 
+    def test_environment_token_overrides_config_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = self._write_config(
+                root,
+                {
+                    "hf": {"token": "config-token", "repo": "oscar-corpus/community-oscar"},
+                    "app": {"workdir": str(root / "work")},
+                },
+            )
+            with patch.dict(os.environ, {"HF_TOKEN": "env-token"}, clear=False):
+                settings = config.load_settings(str(cfg))
+
+        self.assertEqual(settings.hf_token, "env-token")
+
     def test_raises_when_token_missing_everywhere(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

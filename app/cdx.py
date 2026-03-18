@@ -296,14 +296,29 @@ def resolve_missing(settings: Settings, conn, limit: int | None = None) -> None:
     cache: dict[tuple[str, str], Optional[CDXMatch]] = {}
     limiter = RateLimiter(settings.cdx_min_delay)
 
-    rows = list(db.iter_missing_offsets(conn, limit=limit))
-    print(f"[cyan]Resolving offsets for {len(rows)} urls[/cyan]")
+    rows = iter(db.iter_missing_offsets(conn, limit=limit))
+    first_row = next(rows, None)
+    if first_row is None:
+        print("[green]No missing offsets to resolve[/green]")
+        return
+    if limit is not None:
+        print(f"[cyan]Resolving offsets for up to {limit} urls[/cyan]")
+    else:
+        print("[cyan]Resolving offsets for pending urls[/cyan]")
+
+    def row_iter():
+        yield first_row
+        yield from rows
 
     hits = 0
     misses = 0
     pending_writes = 0
     with requests.Session() as session:
-        for row in track(rows, description="CDX lookups"):
+        if limit is not None:
+            loop = track(row_iter(), description="CDX lookups", total=limit)
+        else:
+            loop = row_iter()
+        for row in loop:
             snapshot_name = row["snapshot_name"]
             candidates = []
             if row["url_raw"]:

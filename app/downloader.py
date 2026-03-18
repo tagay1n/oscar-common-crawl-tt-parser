@@ -183,12 +183,19 @@ def download_missing_ranges(
     byte range, handles transient network/rate-limit/server failures, decodes the
     embedded response payload, and stores extracted HTML plus per-row status.
     """
-    rows = list(db.iter_pending_html(conn, snapshot=snapshot, limit=limit))
-    if not rows:
+    rows = iter(db.iter_pending_html(conn, snapshot=snapshot, limit=limit))
+    first_row = next(rows, None)
+    if first_row is None:
         print("[yellow]No pending rows with offsets to download[/yellow]")
         return
+    if limit is not None:
+        print(f"[cyan]Downloading up to {limit} ranges via HTTP Range requests[/cyan]")
+    else:
+        print("[cyan]Downloading pending ranges via HTTP Range requests[/cyan]")
 
-    print(f"[cyan]Downloading {len(rows)} ranges via HTTP Range requests[/cyan]")
+    def row_iter():
+        yield first_row
+        yield from rows
     last_request = 0.0
     global_cooldown_until = 0.0
     rate_limit_streak = 0
@@ -196,7 +203,11 @@ def download_missing_ranges(
 
     with requests.Session() as session:
         pending_writes = 0
-        for row in track(rows, description="Fetching ranges"):
+        if limit is not None:
+            loop = track(row_iter(), description="Fetching ranges", total=limit)
+        else:
+            loop = row_iter()
+        for row in loop:
             try:
                 start = int(row["offset"])
                 length = int(row["length"])
