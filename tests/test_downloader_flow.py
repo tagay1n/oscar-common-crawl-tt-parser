@@ -224,6 +224,46 @@ class DownloaderFlowTests(unittest.TestCase):
         self.assertIsNone(row["saved_path"])
         self.assertIn("Exhausted retries for range download", row["last_error"])
 
+    def test_write_path_file_returns_unique_count(self) -> None:
+        snapshot_id = db.ensure_snapshot(self.conn, "path/shard", "CC-MAIN-2014-99")
+        db.insert_urls(
+            self.conn,
+            snapshot_id,
+            [
+                {
+                    "url_raw": "https://example.com/1",
+                    "url_norm": "https://example.com/1",
+                    "warc_date": None,
+                    "warc_record_id": "rec-1",
+                    "digest": "sha1:1",
+                },
+                {
+                    "url_raw": "https://example.com/2",
+                    "url_norm": "https://example.com/2",
+                    "warc_date": None,
+                    "warc_record_id": "rec-2",
+                    "digest": "sha1:2",
+                },
+                {
+                    "url_raw": "https://example.com/3",
+                    "url_norm": "https://example.com/3",
+                    "warc_date": None,
+                    "warc_record_id": "rec-3",
+                    "digest": "sha1:3",
+                },
+            ],
+        )
+        ids = [row["id"] for row in self.conn.execute("SELECT id FROM urls ORDER BY id").fetchall()]
+        db.update_offset(self.conn, ids[0], "crawl/a.warc.gz", 0, 10, "matched")
+        db.update_offset(self.conn, ids[1], "crawl/a.warc.gz", 10, 10, "matched")
+        db.update_offset(self.conn, ids[2], "crawl/b.warc.gz", 20, 10, "matched")
+
+        out = self.settings.workdir / "warc_paths.txt"
+        count = downloader.write_path_file(self.settings, self.conn, out)
+
+        self.assertEqual(count, 2)
+        self.assertEqual(out.read_text(encoding="utf-8").splitlines(), ["crawl/a.warc.gz", "crawl/b.warc.gz"])
+
 
 if __name__ == "__main__":
     unittest.main()

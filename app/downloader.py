@@ -13,8 +13,10 @@ from rich import print
 from rich.progress import track
 from warcio.archiveiterator import ArchiveIterator
 
-from app import db
+from app import backoff, db
 from app.config import Settings
+
+COMMIT_BATCH_SIZE = 200
 
 
 def write_path_file(settings: Settings, conn, path_file: Path) -> int:
@@ -24,12 +26,13 @@ def write_path_file(settings: Settings, conn, path_file: Path) -> int:
         print("[yellow]No WARC filenames ready for download[/yellow]")
         return 0
 
+    unique_filenames = sorted(set(filenames))
     path_file.parent.mkdir(parents=True, exist_ok=True)
     with open(path_file, "w") as f:
-        for name in sorted(set(filenames)):
+        for name in unique_filenames:
             f.write(f"{name}\n")
-    print(f"[green]Wrote {len(filenames)} paths -> {path_file}[/green]")
-    return len(filenames)
+    print(f"[green]Wrote {len(unique_filenames)} paths -> {path_file}[/green]")
+    return len(unique_filenames)
 
 
 def run_cc_downloader(settings: Settings, path_file: Path) -> None:
@@ -132,6 +135,7 @@ def _extract_warc_file(settings: Settings, conn, warc_path: Path, rows: Iterable
     validates the target URL, decodes/decompresses payload content when needed,
     writes HTML to snapshot-scoped output directories, and updates SQLite status.
     """
+    pending_writes = 0
     with open(warc_path, "rb") as fh:
         for row in track(rows, description=warc_path.name):
             try:
@@ -158,10 +162,16 @@ def _extract_warc_file(settings: Settings, conn, warc_path: Path, rows: Iterable
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(text)
 
-                db.mark_saved(conn, row["id"], str(out_path), status="downloaded")
+                db.mark_saved(conn, row["id"], str(out_path), status="downloaded", commit=False)
             except Exception as e:
-                db.record_error(conn, row["id"], str(e))
+                db.record_error(conn, row["id"], str(e), commit=False)
                 print(f"[red]Failed {row['url_raw']}: {e}[/red]")
+            pending_writes += 1
+            if pending_writes >= COMMIT_BATCH_SIZE:
+                conn.commit()
+                pending_writes = 0
+    if pending_writes:
+        conn.commit()
 
 
 def download_missing_ranges(
@@ -185,6 +195,7 @@ def download_missing_ranges(
     server_error_streak = 0
 
     with requests.Session() as session:
+        pending_writes = 0
         for row in track(rows, description="Fetching ranges"):
             try:
                 start = int(row["offset"])
@@ -220,14 +231,9 @@ def download_missing_ranges(
                             url, headers=headers, stream=True, timeout=settings.cdx_timeout
                         ) as resp:
                             if resp.status_code in (429, 503):
-                                retry_after = resp.headers.get("Retry-After")
-                                if retry_after:
-                                    try:
-                                        sleep_for = float(retry_after)
-                                    except ValueError:
-                                        sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
-                                else:
-                                    sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
+                                sleep_for = backoff.parse_retry_after_or_default(
+                                    resp.headers.get("Retry-After"), attempt
+                                )
 
                                 rate_limit_streak += 1
                                 server_error_streak = 0
@@ -260,7 +266,7 @@ def download_missing_ranges(
 
                             if resp.status_code >= 500:
                                 server_error_streak += 1
-                                sleep_for = 2 * (attempt + 1)
+                                sleep_for = backoff.linear_backoff(attempt)
                                 if server_error_streak >= 4:
                                     extra = min(
                                         60.0,
@@ -288,7 +294,7 @@ def download_missing_ranges(
                             break
                     except requests.RequestException as e:
                         last_failure = f"network error: {e}"
-                        sleep_for = 2 * (attempt + 1)
+                        sleep_for = backoff.linear_backoff(attempt)
                         print(f"[yellow]Network error {e}, sleeping {sleep_for}s[/yellow]")
                         time.sleep(sleep_for)
                         continue
@@ -315,7 +321,13 @@ def download_missing_ranges(
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(text)
 
-                db.mark_saved(conn, row["id"], str(out_path), status="downloaded")
+                db.mark_saved(conn, row["id"], str(out_path), status="downloaded", commit=False)
             except Exception as e:
-                db.record_error(conn, row["id"], str(e))
+                db.record_error(conn, row["id"], str(e), commit=False)
                 print(f"[red]Failed {row['url_raw']}: {e}[/red]")
+            pending_writes += 1
+            if pending_writes >= COMMIT_BATCH_SIZE:
+                conn.commit()
+                pending_writes = 0
+        if pending_writes:
+            conn.commit()

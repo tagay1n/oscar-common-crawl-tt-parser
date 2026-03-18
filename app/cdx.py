@@ -15,11 +15,12 @@ from requests import Session
 from rich import print
 from rich.progress import track
 
-from app import db
+from app import backoff, db
 from app.config import Settings
 
 CDX_NAME_RE = re.compile(r"cdx-\d{5}\.gz")
 CDX_CHUNK_SIZE = 1024 * 1024
+COMMIT_BATCH_SIZE = 200
 
 
 @dataclass
@@ -253,26 +254,21 @@ def lookup_url(
                 base, params=params, headers=headers, timeout=settings.cdx_timeout
             )
         except requests.RequestException as e:
-            wait = 2 * (attempt + 1)
+            wait = backoff.linear_backoff(attempt)
             print(f"[yellow]Network error {e}, sleeping {wait}s[/yellow]")
             time.sleep(wait)
             continue
 
         if resp.status_code in (429, 503):
-            retry_after = resp.headers.get("Retry-After")
-            if retry_after:
-                try:
-                    wait = float(retry_after)
-                except ValueError:
-                    wait = 3 * (attempt + 1) + random.uniform(0, 2)
-            else:
-                wait = 3 * (attempt + 1) + random.uniform(0, 2)
+            wait = backoff.parse_retry_after_or_default(
+                resp.headers.get("Retry-After"), attempt
+            )
             print(f"[yellow]{resp.status_code} rate limit, sleeping {wait:.1f}s[/yellow]")
             time.sleep(wait)
             continue
 
         if resp.status_code >= 500:
-            wait = 2 * (attempt + 1)
+            wait = backoff.linear_backoff(attempt)
             print(f"[yellow]Server {resp.status_code}, sleeping {wait}s[/yellow]")
             time.sleep(wait)
             continue
@@ -305,6 +301,7 @@ def resolve_missing(settings: Settings, conn, limit: int | None = None) -> None:
 
     hits = 0
     misses = 0
+    pending_writes = 0
     with requests.Session() as session:
         for row in track(rows, description="CDX lookups"):
             snapshot_name = row["snapshot_name"]
@@ -339,10 +336,25 @@ def resolve_missing(settings: Settings, conn, limit: int | None = None) -> None:
                     match.offset,
                     match.length,
                     status="matched",
+                    commit=False,
                 )
             else:
                 misses += 1
-                db.update_offset(conn, row["id"], row["filename"], row["offset"], row["length"], "missing")
+                db.update_offset(
+                    conn,
+                    row["id"],
+                    row["filename"],
+                    row["offset"],
+                    row["length"],
+                    "missing",
+                    commit=False,
+                )
+            pending_writes += 1
+            if pending_writes >= COMMIT_BATCH_SIZE:
+                conn.commit()
+                pending_writes = 0
+    if pending_writes:
+        conn.commit()
 
     print(f"[green]CDX matched {hits} urls[/green], missing {misses}")
 
@@ -446,6 +458,7 @@ def resolve_missing_local(
 
             matched = 0
             missing = 0
+            pending_writes = 0
             for state in track(states, description="Writing matches"):
                 if state.match:
                     matched += 1
@@ -456,6 +469,7 @@ def resolve_missing_local(
                         state.match.offset,
                         state.match.length,
                         status="matched",
+                        commit=False,
                     )
                 else:
                     missing += 1
@@ -466,7 +480,14 @@ def resolve_missing_local(
                         state.offset,
                         state.length,
                         status="missing",
+                        commit=False,
                     )
+                pending_writes += 1
+                if pending_writes >= COMMIT_BATCH_SIZE:
+                    conn.commit()
+                    pending_writes = 0
+            if pending_writes:
+                conn.commit()
 
             print(f"[green]{snap}: matched {matched}, missing {missing}[/green]")
             total_matched += matched

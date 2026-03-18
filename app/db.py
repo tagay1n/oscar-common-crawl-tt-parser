@@ -216,6 +216,7 @@ def update_offset(
     offset: int | None,
     length: int | None,
     status: str,
+    commit: bool = True,
 ) -> None:
     """Persist resolved location metadata for one URL row."""
     conn.execute(
@@ -226,7 +227,8 @@ def update_offset(
         """,
         (filename, offset, length, status, url_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def list_warc_filenames(conn: sqlite3.Connection) -> list[str]:
@@ -285,7 +287,9 @@ def urls_for_warc(conn: sqlite3.Connection, filename: str) -> Iterable[sqlite3.R
     return cur.fetchall()
 
 
-def mark_saved(conn: sqlite3.Connection, url_id: int, path: str, status: str) -> None:
+def mark_saved(
+    conn: sqlite3.Connection, url_id: int, path: str, status: str, commit: bool = True
+) -> None:
     """Record the saved HTML path and clear prior error state."""
     conn.execute(
         """
@@ -295,10 +299,13 @@ def mark_saved(conn: sqlite3.Connection, url_id: int, path: str, status: str) ->
         """,
         (path, status, url_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
-def record_error(conn: sqlite3.Connection, url_id: int, message: str) -> None:
+def record_error(
+    conn: sqlite3.Connection, url_id: int, message: str, commit: bool = True
+) -> None:
     """Store a truncated error message for a failed row."""
     conn.execute(
         """
@@ -308,4 +315,5 @@ def record_error(conn: sqlite3.Connection, url_id: int, message: str) -> None:
         """,
         (message[:500], url_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
