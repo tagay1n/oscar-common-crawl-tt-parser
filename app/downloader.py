@@ -180,85 +180,142 @@ def download_missing_ranges(
 
     print(f"[cyan]Downloading {len(rows)} ranges via HTTP Range requests[/cyan]")
     last_request = 0.0
-    for row in track(rows, description="Fetching ranges"):
-        try:
-            start = int(row["offset"])
-            length = int(row["length"])
-            end = start + length - 1
-            url = f"https://data.commoncrawl.org/{row['filename'].lstrip('/')}"
-            headers = {
-                "Range": f"bytes={start}-{end}",
-                "User-Agent": "tt-html-extractor/1.0 (+https://huggingface.co/yasalma)",
-            }
+    global_cooldown_until = 0.0
+    rate_limit_streak = 0
+    server_error_streak = 0
 
-            body: bytes | None = None
-            for attempt in range(settings.cdx_max_retries):
-                # Polite pacing with jitter to avoid CC rate limits.
-                now = time.time()
-                target = settings.cdx_min_delay + random.uniform(0, 0.5)
-                wait = target - (now - last_request)
-                if wait > 0:
-                    time.sleep(wait)
-                last_request = time.time()
+    with requests.Session() as session:
+        for row in track(rows, description="Fetching ranges"):
+            try:
+                start = int(row["offset"])
+                length = int(row["length"])
+                end = start + length - 1
+                url = f"https://data.commoncrawl.org/{row['filename'].lstrip('/')}"
+                headers = {
+                    "Range": f"bytes={start}-{end}",
+                    "User-Agent": "tt-html-extractor/1.0 (+https://huggingface.co/yasalma)",
+                }
 
-                try:
-                    resp = requests.get(
-                        url, headers=headers, stream=True, timeout=settings.cdx_timeout
+                body: bytes | None = None
+                last_failure = "unknown transient failure"
+                for attempt in range(settings.cdx_max_retries):
+                    now = time.time()
+                    if global_cooldown_until > now:
+                        cooldown_wait = global_cooldown_until - now
+                        print(
+                            f"[yellow]Global cooldown active, sleeping {cooldown_wait:.1f}s[/yellow]"
+                        )
+                        time.sleep(cooldown_wait)
+
+                    # Polite pacing with jitter to avoid CC rate limits.
+                    now = time.time()
+                    target = settings.cdx_min_delay + random.uniform(0, 0.5)
+                    wait = target - (now - last_request)
+                    if wait > 0:
+                        time.sleep(wait)
+                    last_request = time.time()
+
+                    try:
+                        with session.get(
+                            url, headers=headers, stream=True, timeout=settings.cdx_timeout
+                        ) as resp:
+                            if resp.status_code in (429, 503):
+                                retry_after = resp.headers.get("Retry-After")
+                                if retry_after:
+                                    try:
+                                        sleep_for = float(retry_after)
+                                    except ValueError:
+                                        sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
+                                else:
+                                    sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
+
+                                rate_limit_streak += 1
+                                server_error_streak = 0
+                                extra = 0.0
+                                # Escalate cooldown when CC keeps rate-limiting us.
+                                if rate_limit_streak >= 3:
+                                    extra = min(
+                                        120.0,
+                                        5.0 * (2 ** min(rate_limit_streak - 3, 4)),
+                                    )
+                                    global_cooldown_until = max(
+                                        global_cooldown_until,
+                                        time.time() + extra,
+                                    )
+
+                                last_failure = (
+                                    f"rate-limited HTTP {resp.status_code} for {url}"
+                                )
+                                print(
+                                    f"[yellow]{resp.status_code} rate limit, sleeping {sleep_for:.1f}s[/yellow]"
+                                )
+                                if extra > 0:
+                                    print(
+                                        f"[yellow]Applying extra cooldown {extra:.1f}s (streak={rate_limit_streak})[/yellow]"
+                                    )
+                                time.sleep(sleep_for)
+                                continue
+
+                            rate_limit_streak = 0
+
+                            if resp.status_code >= 500:
+                                server_error_streak += 1
+                                sleep_for = 2 * (attempt + 1)
+                                if server_error_streak >= 4:
+                                    extra = min(
+                                        60.0,
+                                        5.0 * (2 ** min(server_error_streak - 4, 3)),
+                                    )
+                                    global_cooldown_until = max(
+                                        global_cooldown_until,
+                                        time.time() + extra,
+                                    )
+                                last_failure = f"server HTTP {resp.status_code} for {url}"
+                                print(
+                                    f"[yellow]Server {resp.status_code}, sleeping {sleep_for}s[/yellow]"
+                                )
+                                time.sleep(sleep_for)
+                                continue
+
+                            server_error_streak = 0
+
+                            if resp.status_code not in (200, 206):
+                                raise requests.HTTPError(
+                                    f"Unexpected status {resp.status_code} for {url}"
+                                )
+
+                            body = resp.content
+                            break
+                    except requests.RequestException as e:
+                        last_failure = f"network error: {e}"
+                        sleep_for = 2 * (attempt + 1)
+                        print(f"[yellow]Network error {e}, sleeping {sleep_for}s[/yellow]")
+                        time.sleep(sleep_for)
+                        continue
+
+                if body is None:
+                    raise RuntimeError(
+                        f"Exhausted retries for range download ({last_failure})"
                     )
-                except requests.RequestException as e:
-                    sleep_for = 2 * (attempt + 1)
-                    print(f"[yellow]Network error {e}, sleeping {sleep_for}s[/yellow]")
-                    time.sleep(sleep_for)
-                    continue
+                record = next(ArchiveIterator(io.BytesIO(body)))
+                payload = record.content_stream().read()
+                encoding = (
+                    record.http_headers.get_header("Content-Encoding")
+                    if record.http_headers
+                    else None
+                )
+                if encoding and "gzip" in encoding.lower():
+                    payload = zlib.decompress(payload, 16 + zlib.MAX_WBITS)
 
-                if resp.status_code in (429, 503):
-                    retry_after = resp.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            sleep_for = float(retry_after)
-                        except ValueError:
-                            sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
-                    else:
-                        sleep_for = 3 * (attempt + 1) + random.uniform(0, 2)
-                    print(f"[yellow]{resp.status_code} rate limit, sleeping {sleep_for:.1f}s[/yellow]")
-                    time.sleep(sleep_for)
-                    continue
+                text = payload.decode("utf-8", errors="replace")
+                out_dir = settings.html_dir / row["snapshot_name"]
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_name = safe_filename(row["url_raw"], row["digest"]) + ".html"
+                out_path = out_dir / out_name
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(text)
 
-                if resp.status_code >= 500:
-                    sleep_for = 2 * (attempt + 1)
-                    print(f"[yellow]Server {resp.status_code}, sleeping {sleep_for}s[/yellow]")
-                    time.sleep(sleep_for)
-                    continue
-
-                if resp.status_code not in (200, 206):
-                    raise requests.HTTPError(
-                        f"Unexpected status {resp.status_code} for {url}"
-                    )
-
-                body = resp.content
-                break
-
-            if body is None:
-                raise RuntimeError("Exhausted retries for range download")
-            record = next(ArchiveIterator(io.BytesIO(body)))
-            payload = record.content_stream().read()
-            encoding = (
-                record.http_headers.get_header("Content-Encoding")
-                if record.http_headers
-                else None
-            )
-            if encoding and "gzip" in encoding.lower():
-                payload = zlib.decompress(payload, 16 + zlib.MAX_WBITS)
-
-            text = payload.decode("utf-8", errors="replace")
-            out_dir = settings.html_dir / row["snapshot_name"]
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_name = safe_filename(row["url_raw"], row["digest"]) + ".html"
-            out_path = out_dir / out_name
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(text)
-
-            db.mark_saved(conn, row["id"], str(out_path), status="downloaded")
-        except Exception as e:
-            db.record_error(conn, row["id"], str(e))
-            print(f"[red]Failed {row['url_raw']}: {e}[/red]")
+                db.mark_saved(conn, row["id"], str(out_path), status="downloaded")
+            except Exception as e:
+                db.record_error(conn, row["id"], str(e))
+                print(f"[red]Failed {row['url_raw']}: {e}[/red]")

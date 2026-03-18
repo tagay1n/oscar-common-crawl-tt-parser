@@ -1,3 +1,11 @@
 hf:
   token: ""
   repo: oscar-corpus/community-oscar
+
+cdx:
+  min_delay: 4.0
+  max_retries: 10
+  timeout: 60
+
+cc_downloader:
+  threads: 1
