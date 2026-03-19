@@ -224,6 +224,39 @@ class DownloaderFlowTests(unittest.TestCase):
         self.assertIsNone(row["saved_path"])
         self.assertIn("Exhausted retries for range download", row["last_error"])
 
+    def test_download_missing_ranges_shows_progress_without_limit(self) -> None:
+        url = "https://example.com/range-progress"
+        row_id = self._insert_row("CC-MAIN-2014-46", url)
+        db.update_offset(self.conn, row_id, "crawl-data/c.warc.gz", 0, 128, "matched")
+        session = _FakeSession([_FakeResponse(206, content=b"ignored")])
+
+        track_kwargs: list[dict] = []
+
+        def fake_track(iterable, **kwargs):
+            track_kwargs.append(kwargs)
+            return iterable
+
+        with patch("app.downloader.requests.Session", return_value=session):
+            with patch("app.downloader.time.sleep", return_value=None):
+                with patch("app.downloader.random.uniform", return_value=0.0):
+                    with patch("app.downloader.track", side_effect=fake_track):
+                        with patch(
+                            "app.downloader.ArchiveIterator",
+                            return_value=iter([_FakeRecord(url, b"<html>ok</html>")]),
+                        ):
+                            downloader.download_missing_ranges(self.settings, self.conn)
+
+        self.assertEqual(len(track_kwargs), 1)
+        self.assertEqual(track_kwargs[0]["description"], "Fetching ranges")
+        self.assertEqual(track_kwargs[0]["total"], 1)
+
+        row = self.conn.execute(
+            "SELECT status, saved_path, last_error FROM urls WHERE id = ?", (row_id,)
+        ).fetchone()
+        self.assertEqual(row["status"], "downloaded")
+        self.assertIsNotNone(row["saved_path"])
+        self.assertIsNone(row["last_error"])
+
     def test_write_path_file_returns_unique_count(self) -> None:
         snapshot_id = db.ensure_snapshot(self.conn, "path/shard", "CC-MAIN-2014-99")
         db.insert_urls(

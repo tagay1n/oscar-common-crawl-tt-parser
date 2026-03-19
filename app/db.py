@@ -287,6 +287,25 @@ def iter_pending_html(
     return conn.execute(sql, params)
 
 
+def count_pending_html(conn: sqlite3.Connection, snapshot: str | None = None) -> int:
+    """Count rows that are ready for range download but not yet saved."""
+    sql = """
+    SELECT COUNT(*) AS total
+    FROM urls
+    JOIN snapshots ON snapshots.id = urls.snapshot_id
+    WHERE urls.filename IS NOT NULL
+      AND urls.offset IS NOT NULL
+      AND urls.length IS NOT NULL
+      AND urls.saved_path IS NULL
+    """
+    params: list = []
+    if snapshot:
+        sql += " AND snapshots.snapshot_name = ?"
+        params.append(snapshot)
+    row = conn.execute(sql, params).fetchone()
+    return int(row["total"])
+
+
 def urls_for_warc(conn: sqlite3.Connection, filename: str) -> Iterable[sqlite3.Row]:
     """Fetch pending rows associated with one WARC file."""
     cur = conn.execute(

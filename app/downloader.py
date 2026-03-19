@@ -192,6 +192,7 @@ def download_missing_ranges(
         print(f"[cyan]Downloading up to {limit} ranges via HTTP Range requests[/cyan]")
     else:
         print("[cyan]Downloading pending ranges via HTTP Range requests[/cyan]")
+    progress_total = limit if limit is not None else db.count_pending_html(conn, snapshot=snapshot)
 
     def row_iter():
         yield first_row
@@ -203,10 +204,7 @@ def download_missing_ranges(
 
     with requests.Session() as session:
         pending_writes = 0
-        if limit is not None:
-            loop = track(row_iter(), description="Fetching ranges", total=limit)
-        else:
-            loop = row_iter()
+        loop = track(row_iter(), description="Fetching ranges", total=progress_total)
         for row in loop:
             try:
                 start = int(row["offset"])
