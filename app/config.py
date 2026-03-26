@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 
-DEFAULT_WORKDIR = Path(os.environ.get("OSCAR_APP_DIR", Path.home() / ".oscar")).expanduser()
+DEFAULT_WORKDIR = Path(os.environ.get("OSCAR_APP_DIR", Path.home() / ".manzara" / "oscar")).expanduser()
 
 
 @dataclass

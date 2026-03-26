@@ -34,7 +34,7 @@ hf:
   repo: oscar-corpus/community-oscar
 
 app:
-  workdir: ~/.oscar
+  workdir: ~/.manzara/oscar
 
 cc_downloader:
   binary: cc-downloader/cc-downloader
@@ -56,14 +56,14 @@ export HF_TOKEN=YOUR_HF_TOKEN
 
 ## CLI Overview
 
-Entry point: `python -m app.cli`. Default workdir: `~/.oscar` (override via `config.yaml` `app.workdir` or `OSCAR_APP_DIR`). Key commands:
+Entry point: `python -m app.cli`. Default workdir: `~/.manzara/oscar` (override via `config.yaml` `app.workdir` or `OSCAR_APP_DIR`). Key commands:
 
 1. Ingest OSCAR shards into SQLite  
 `python -m app.cli ingest [--force]`
 
 2. Resolve offsets via local CDX shards (preferred; no public API rate limits)  
 `python -m app.cli resolve-offsets-local --snapshot CC-MAIN-2014-42`  
-Downloads `indexes/cdx-*.gz` to `~/.oscar/indexes/<snapshot>/` (cached), scans locally, and updates offsets/filenames.
+Downloads `indexes/cdx-*.gz` to `~/.manzara/oscar/indexes/<snapshot>/` (cached), scans locally, and updates offsets/filenames.
 
 3. Optional fallback resolver via online CDX API  
 `python -m app.cli resolve-offsets [--limit N]`
@@ -103,7 +103,7 @@ app/
 └── config.py      # Settings loader (paths, tokens, cc-downloader)
 ```
 
-Persistent workspace (`~/.oscar/`):
+Persistent workspace (`~/.manzara/oscar/`):
 
 - `state.sqlite` – URLs, offsets, filenames, download status
 - `shards/` – Downloaded OSCAR shards
